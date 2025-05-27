@@ -21,7 +21,7 @@ from rich.progress import (
 from docstra.core.config.settings import DocumentationConfig, ModelProvider, UserConfig
 from docstra.core.document_processing.document import Document
 from docstra.core.document_processing.extractor import DocumentProcessor
-from docstra.core.documentation.generator import DocumentationGenerator
+# Old generator import removed - now using EnhancedDocumentationGenerator
 from docstra.core.indexing.code_index import (
     CodebaseIndexer,
 )  # For loading index for repo_map
@@ -227,11 +227,14 @@ class DocumentationService:
                     index_directory=str(code_indexer_path)
                 ).get_index()
                 if temp_code_index:
-                    with open(map_path, "r") as f_map:
-                        repo_map_data = json.load(f_map)
-                    repo_map = RepositoryMap.from_dict(repo_map_data, temp_code_index)
+                    # Create repo map from documents instead of loading from dict
+                    repo_map = RepositoryMap.from_documents(
+                        documents_for_generation, 
+                        str(input_path_abs),
+                        temp_code_index
+                    )
                     self.console.print(
-                        f"[dim]Repo map data found at {map_path}. Generator may use it.[/dim]"
+                        f"[dim]Repo map created from documents and index.[/dim]"
                     )
             except Exception as e_map:
                 self.console.print(
@@ -257,40 +260,57 @@ class DocumentationService:
                     f"[yellow]Warning: Could not initialize ChromaRetriever: {e_chroma}[/yellow]"
                 )
 
+        # Get code index if available
+        code_index = None
+        if abs_persist_directory and (abs_persist_directory / "index").exists():
+            try:
+                from docstra.core.indexing.code_index import CodebaseIndexer
+                indexer = CodebaseIndexer(index_directory=str(abs_persist_directory / "index"))
+                code_index = indexer.get_index()
+            except Exception as e:
+                self.console.print(f"[yellow]Warning: Could not load code index: {e}[/yellow]")
+        
+        # Import the enhanced generator
+        from docstra.core.documentation.generator import DocumentationGenerator
+        
         doc_generator = DocumentationGenerator(
             llm_client=self.llm_client,
             output_dir=effective_output_dir,
-            format=effective_format,
             repo_map=repo_map,
             chroma_retriever=chroma_retriever,
-            documentation_structure=effective_structure,
-            module_doc_depth=effective_module_depth,
-            llm_style_prompt=effective_llm_style_prompt,
-            exclude_patterns=effective_exclude_patterns,
-            theme=effective_theme,
+            code_index=code_index,
             project_name=effective_project_name,
             project_description=effective_project_description,
-            incremental=incremental,
             console=self.console,
+            max_workers=effective_max_workers,
+            documentation_depth="comprehensive",
+            style_guide=effective_llm_style_prompt,
         )
 
         self.console.print(
             f"Generating documentation with {effective_max_workers} worker(s)..."
         )
         try:
-            doc_generator.generate_for_repository(
+            success = doc_generator.generate_documentation(
                 documents=documents_for_generation,
-                repo_name=effective_project_name,
-                repo_description=effective_project_description,
-                max_workers=effective_max_workers,
+                generate_guides=True,
+                generate_api_docs=True,
+                generate_cross_references=True,
             )
-            self.console.print(
-                "[bold green]Documentation generation process finished.[/bold green]"
-            )
-            self.console.print(
-                f"Output at: [link=file://{effective_output_dir.resolve()}]{effective_output_dir.resolve()}[/link]"
-            )
-            return True
+            
+            if success:
+                self.console.print(
+                    "[bold green]Documentation generation process finished.[/bold green]"
+                )
+                self.console.print(
+                    f"Output at: [link=file://{effective_output_dir.resolve()}]{effective_output_dir.resolve()}[/link]"
+                )
+                return True
+            else:
+                self.console.print(
+                    "[bold red]Documentation generation failed.[/bold red]"
+                )
+                return False
         except Exception as e_gen:
             self.console.print(
                 f"[bold red]Error during documentation generation: {e_gen}[/bold red]"

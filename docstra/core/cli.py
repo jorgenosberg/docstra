@@ -833,31 +833,18 @@ def generate(
 
     # Generate documentation for each document
     doc_generator = DocumentationGenerator(
-        llm_client,
-        # Convert config values to the expected types
+        llm_client=llm_client,
         output_dir=(
             str(config["output_dir"][0])
             if isinstance(config["output_dir"], list)
             else str(config["output_dir"])
         ),
-        format=(
-            str(config["format"][0])
-            if isinstance(config["format"], list)
-            else str(config["format"])
-        ),
+        project_name=config["name"],
+        project_description=config["description"],
+        console=console,
     )
 
-    # Update generator with additional config - use setattr for attributes that might not exist
-    # This is a temporary solution until the DocumentationGenerator class is updated
-    try:
-        setattr(doc_generator, "project_name", config["name"])
-        setattr(doc_generator, "project_description", config["description"])
-        setattr(doc_generator, "project_version", config["version"])
-        setattr(doc_generator, "theme", config["theme"])
-    except AttributeError:
-        # If these attributes don't exist, log a warning but continue
-        console.print(f"[{Colors.WARNING}]Warning: Unable to set all documentation attributes.[/]")
-        console.print(f"[{Colors.WARNING}]Some customization options may not be applied.[/]")
+    # Enhanced generator has proper constructor parameters, no need for setattr
 
     with Progress(
         SpinnerColumn(),
@@ -887,7 +874,7 @@ def generate(
         serve_documentation_from_generator(output_dir_str, port)
 
 
-# Update the serve_documentation function to use the new DocumentationGenerator
+# Update the serve_documentation function to use the enhanced DocumentationGenerator
 def serve_documentation_from_generator(docs_dir: str, port: int = 8000) -> None:
     """Serve documentation using MkDocs or a simple HTTP server."""
     from docstra.core.documentation.generator import DocumentationGenerator
