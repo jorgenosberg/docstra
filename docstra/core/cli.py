@@ -764,21 +764,23 @@ def generate(
             console.print(f"\n[{Colors.ERROR}]Error in wizard: {e}[/]")
             console.print(f"[{Colors.WARNING}]Proceeding with default/CLI values[/]")
 
-    # Print configuration summary
-    console.print(
-        Panel(f"[{Colors.BOLD}]Generating documentation for:[/] {config['name']}", expand=False)
-    )
-    console.print(f"[{Colors.BOLD}]Description:[/] {config['description']}")
-    console.print(f"[{Colors.BOLD}]Output directory:[/] {config['output_dir']}")
-    console.print(f"[{Colors.BOLD}]Format:[/] {config['format']}")
+    # Print configuration summary with enhanced styling
+    console.print(Panel(
+        f"[{Colors.BOLD}]📚 Generating Documentation for:[/] {config['name']}", 
+        style=Colors.INFO_BOLD, 
+        expand=False
+    ))
+    console.print(f"📄 [{Colors.BOLD}]Description:[/] {config['description']}")
+    console.print(f"📁 [{Colors.BOLD}]Output directory:[/] {config['output_dir']}")
+    console.print(f"📄 [{Colors.BOLD}]Format:[/] {config['format']}")
 
     if config["include_dirs"]:
         console.print(
-            f"[{Colors.BOLD}]Including directories:[/] {', '.join(config['include_dirs'])}"
+            f"🎯 [{Colors.BOLD}]Including directories:[/] {', '.join(config['include_dirs'])}"
         )
 
     console.print(
-        f"[{Colors.BOLD}]Excluding directories:[/] {', '.join(config['exclude_dirs'])}"
+        f"🚫 [{Colors.BOLD}]Excluding directories:[/] {', '.join(config['exclude_dirs'])}"
     )
 
     # Create output directory - ensure string type
@@ -790,31 +792,65 @@ def generate(
     llm_client = get_llm_client(config_manager)
     doc_processor = DocumentProcessor()
 
-    # Use our file collection utility to gather files
+    # Use our file collection utility to gather files with clean status indicator
     # Convert to proper List[str] types
     include_dirs_list: List[str] = list(config["include_dirs"])
     exclude_dirs_list: List[str] = list(config["exclude_dirs"])
     exclude_files_list: List[str] = list(config["exclude_files"])
 
-    file_paths = collect_files(
-        base_path=path,
-        include_dirs=include_dirs_list,
-        exclude_dirs=exclude_dirs_list,
-        exclude_files=exclude_files_list,
-        file_extensions=FileCollector.default_code_file_extensions(),
-    )
+    with console.status(f"[{Colors.INFO}]🔍 Collecting files for documentation...", spinner="dots"):
+        file_paths = collect_files(
+            base_path=path,
+            include_dirs=include_dirs_list,
+            exclude_dirs=exclude_dirs_list,
+            exclude_files=exclude_files_list,
+            file_extensions=FileCollector.default_code_file_extensions(),
+        )
+    
+    # Show clean file collection summary
+    console.print(f"[{Colors.DIM}]📂 File Collection Summary:[/]")
+    console.print(f"   • [{Colors.SUCCESS}]Found {len(file_paths)} files to document[/]")
+    
+    # Group files by directory for a helpful overview
+    from collections import defaultdict
+    from typing import DefaultDict
+    files_by_dir: DefaultDict[str, int] = defaultdict(int)
+    for file_path in file_paths:
+        dir_name = str(file_path.parent) if hasattr(file_path, 'parent') else str(Path(file_path).parent)
+        # Simplify path display
+        if dir_name == str(Path(path).resolve()):
+            dir_name = "."
+        else:
+            try:
+                dir_name = str(Path(dir_name).relative_to(Path(path).resolve()))
+            except ValueError:
+                pass  # Keep absolute path if relative conversion fails
+        files_by_dir[dir_name] += 1
+    
+    # Show top directories with files
+    if files_by_dir:
+        sorted_dirs = sorted(files_by_dir.items(), key=lambda x: x[1], reverse=True)
+        top_dirs = sorted_dirs[:5]  # Show top 5 directories
+        for dir_name, count in top_dirs:
+            console.print(f"   • [{Colors.SUCCESS}]{dir_name}:[/] {count} files")
+        if len(sorted_dirs) > 5:
+            remaining = sum(count for _, count in sorted_dirs[5:])
+            console.print(f"   • [{Colors.DIM}]... and {remaining} files in other directories[/]")
 
-    # Process collected files
+    # Process collected files with cleaner progress indication
     documents = []
+    failed_files = []
+    
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         TaskProgressColumn(),
         console=console,
+        transient=True,  # Make progress bar disappear when done
     ) as progress:
         processing_task = progress.add_task(
-            f"[{Colors.INFO}]Processing files...", total=len(file_paths)
+            f"[{Colors.INFO}]📄 Processing files...", total=len(file_paths)
         )
 
         for file_path in file_paths:
@@ -823,55 +859,54 @@ def generate(
                 document = doc_processor.process(str(file_path))
                 documents.append(document)
             except Exception as e:
-                console.print(f"[{Colors.WARNING}]Error processing {file_path}: {str(e)}[/]")
+                failed_files.append((file_path, str(e)))
             progress.update(processing_task, advance=1)
+    
+    # Show processing summary
+    console.print(f"[{Colors.DIM}]📄 Processing Summary:[/]")
+    console.print(f"   • [{Colors.SUCCESS}]Successfully processed {len(documents)} files[/]")
+    if failed_files:
+        console.print(f"   • [{Colors.WARNING}]Failed to process {len(failed_files)} files[/]")
+        if len(failed_files) <= 3:  # Show details for few failures
+            for file_path, error in failed_files:
+                console.print(f"     - [{Colors.WARNING}]{file_path}: {error}[/]")
+        else:
+            console.print(f"     [{Colors.DIM}](Run with --verbose for details)[/]")
 
     # No files found
     if not documents:
         console.print(f"[{Colors.WARNING_BOLD}]No files found to document![/]")
         return
 
-    # Generate documentation for each document
-    doc_generator = DocumentationGenerator(
-        llm_client=llm_client,
-        output_dir=(
-            str(config["output_dir"][0])
-            if isinstance(config["output_dir"], list)
-            else str(config["output_dir"])
-        ),
-        project_name=config["name"],
-        project_description=config["description"],
-        console=console,
+    # Use the documentation service for better progress reporting
+    user_config = load_or_init_config()
+    _, _, _, documentation_service = create_services_for_config(user_config)
+    
+    # Generate documentation using the service
+    success = documentation_service.generate_documentation(
+        input_path_str=path,
+        output_dir_str=str(config["output_dir"]),
+        project_name_str=str(config["name"]) if config["name"] else None,
+        project_description_str=str(config["description"]) if config["description"] else None,
+        cli_include_patterns=include_dirs_list if include_dirs_list else None,
+        cli_exclude_patterns=exclude_dirs_list if exclude_dirs_list else None,
     )
-
-    # Enhanced generator has proper constructor parameters, no need for setattr
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Generating documentation...", total=len(documents))
-
-        for document in documents:
-            doc_generator.generate_for_document(document)
-            progress.update(task, advance=1)
-
-    # Build and organize documentation
-    doc_generator.build_documentation()
+    
+    if not success:
+        console.print(f"[{Colors.ERROR_BOLD}]Documentation generation failed.[/]")
+        return
 
     # Ensure output_dir is a string for os.path.abspath
-    output_dir_abs = os.path.abspath(output_dir_str)
-    console.print(
-        f"\n[{Colors.SUCCESS_BOLD}]Documentation generated successfully at:[/] {output_dir_abs}"
-    )
-    console.print(f"[{Colors.SUCCESS}]Documented {len(documents)} files[/]")
+    output_dir_abs = os.path.abspath(str(config["output_dir"]))
+    console.print("\n" + "─" * 60)
+    console.print(f"[{Colors.SUCCESS_BOLD}]🎉 Documentation generated successfully![/]")
+    console.print("─" * 60)
+    console.print(f"📁 [{Colors.BOLD}]Location:[/] {output_dir_abs}")
+    console.print("─" * 60)
 
     # Serve documentation if requested
     if serve:
-        serve_documentation_from_generator(output_dir_str, port)
+        serve_documentation_from_generator(str(config["output_dir"]), port)
 
 
 # Update the serve_documentation function to use the enhanced DocumentationGenerator
