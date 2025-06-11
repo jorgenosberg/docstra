@@ -12,8 +12,7 @@ from rich.panel import Panel
 from docstra.core.config.settings import ConfigManager, UserConfig
 from docstra.core.utils.language_detector import LanguageDetector
 
-# It's good practice to alias imports if they might clash or for clarity
-from docstra.core.config.wizard import run_init_wizard as run_config_wizard
+from docstra.core.config.wizard import run_init_wizard
 
 
 class InitializationService:
@@ -59,11 +58,11 @@ class InitializationService:
         if run_wizard:
             self.console.print(Panel("Project Configuration Wizard", style="bold blue", expand=False))
             try:
-                # Updated to match run_config_wizard signature
-                run_config_wizard(
+                # Call run_init_wizard with correct arguments
+                run_init_wizard(
                     self.console,
-                    str(abs_codebase_path),
-                    config_file_path,  # Pass the string path to wizard
+                    str(abs_codebase_path),  # local_path
+                    config_file_path,        # config_path
                 )
                 # Wizard saves the config, so we reload it to get the latest
                 # No need to call load_config as ConfigManager's constructor handles loading

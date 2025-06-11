@@ -258,7 +258,6 @@ def init(
 ) -> None:
     """Initialize the code documentation assistant for a codebase."""
     from docstra.core.utils.file_collector import collect_files, FileCollector
-    from docstra.core.config.wizard import run_init_wizard
 
     # Display beautiful header for init command
     display_docstra_header()
