@@ -1778,6 +1778,15 @@ def chat(
                 console.print(f"  [{Colors.HIGHLIGHT}]help[/] - Show this help message")
                 console.print(f"  [{Colors.HIGHLIGHT}]clear[/] - Clear the screen")
                 console.print(f"  [{Colors.HIGHLIGHT}]stats[/] - Show token usage statistics")
+                console.print(f"\n[{Colors.BOLD}]Session Management:[/]")
+                console.print(f"  [{Colors.HIGHLIGHT}]sessions[/] - List all chat sessions")
+                console.print(f"  [{Colors.HIGHLIGHT}]switch <session_id>[/] - Switch to another session")
+                console.print(f"  [{Colors.HIGHLIGHT}]new[/] - Start a new chat session")
+                console.print(f"  [{Colors.HIGHLIGHT}]delete <session_id>[/] - Delete a session")
+                console.print(f"  [{Colors.HIGHLIGHT}]info[/] - Show current session details")
+                console.print(f"  [{Colors.HIGHLIGHT}]history[/] - Show recent conversation history")
+                console.print(f"  [{Colors.HIGHLIGHT}]export[/] - Export current conversation to file")
+                console.print(f"\n[{Colors.DIM}]💡 Tip: You can use partial session IDs (e.g., 'switch abc123')[/]")
                 continue
 
             # Check for clear command
@@ -1831,6 +1840,177 @@ def chat(
                             console.print(f"Total cost: ${session_stats.get('total_cost', 0):.5f}")
                         console.print(f"Average duration: {session_stats.get('total_duration_ms', 0)/max(session_stats.get('total_requests', 1), 1):.0f} ms/request")
                 
+                continue
+
+            # Session management commands
+            if user_input.lower() == "sessions":
+                sessions = chat_service.list_sessions()
+                if not sessions:
+                    console.print(f"[{Colors.WARNING}]No chat sessions found.[/]")
+                else:
+                    console.print(f"\n[{Colors.BOLD}]Available Chat Sessions:[/]")
+                    for i, session in enumerate(sessions):
+                        session_marker = "📍" if session['id'] == chat_service.current_session_id else "  "
+                        console.print(
+                            f"{session_marker} [{Colors.HIGHLIGHT}]{session['id'][:8]}[/] - {session['name']} "
+                            f"[{Colors.DIM}](last used: {session['last_accessed_at'][:16]})[/]"
+                        )
+                    console.print(f"\n[{Colors.DIM}]Use 'switch <session_id>' to change sessions[/]")
+                continue
+
+            if user_input.lower().startswith("switch "):
+                session_id = user_input[7:].strip()
+                if not session_id:
+                    console.print(f"[{Colors.ERROR}]Please provide a session ID. Use 'sessions' to see available sessions.[/]")
+                    continue
+                
+                # Try to find session by partial ID match
+                sessions = chat_service.list_sessions()
+                matching_session = None
+                for session in sessions:
+                    if session['id'].startswith(session_id):
+                        matching_session = session
+                        break
+                
+                if not matching_session:
+                    console.print(f"[{Colors.ERROR}]Session '{session_id}' not found. Use 'sessions' to see available sessions.[/]")
+                    continue
+                
+                if chat_service.load_session(matching_session['id'], codebase_path):
+                    console.print(f"[{Colors.SUCCESS}]Switched to session: {matching_session['name']}[/]")
+                else:
+                    console.print(f"[{Colors.ERROR}]Failed to switch to session '{session_id}'[/]")
+                continue
+
+            if user_input.lower() == "new":
+                old_session_name = None
+                if chat_service.current_session_id:
+                    sessions = chat_service.list_sessions()
+                    for session in sessions:
+                        if session['id'] == chat_service.current_session_id:
+                            old_session_name = session['name']
+                            break
+                
+                chat_service.start_new_session(codebase_path)
+                console.print(f"[{Colors.SUCCESS}]Started new chat session[/]")
+                if old_session_name:
+                    console.print(f"[{Colors.DIM}]Previous session '{old_session_name}' is still available[/]")
+                continue
+
+            if user_input.lower().startswith("delete "):
+                session_id = user_input[7:].strip()
+                if not session_id:
+                    console.print(f"[{Colors.ERROR}]Please provide a session ID. Use 'sessions' to see available sessions.[/]")
+                    continue
+                
+                # Prevent deleting current session
+                if chat_service.current_session_id and chat_service.current_session_id.startswith(session_id):
+                    console.print(f"[{Colors.ERROR}]Cannot delete the current active session. Switch to another session first.[/]")
+                    continue
+                
+                # Try to find session by partial ID match
+                sessions = chat_service.list_sessions()
+                matching_session = None
+                for session in sessions:
+                    if session['id'].startswith(session_id):
+                        matching_session = session
+                        break
+                
+                if not matching_session:
+                    console.print(f"[{Colors.ERROR}]Session '{session_id}' not found. Use 'sessions' to see available sessions.[/]")
+                    continue
+                
+                if chat_service.delete_session(matching_session['id']):
+                    console.print(f"[{Colors.SUCCESS}]Deleted session: {matching_session['name']}[/]")
+                else:
+                    console.print(f"[{Colors.ERROR}]Failed to delete session '{session_id}'[/]")
+                continue
+
+            if user_input.lower() == "info":
+                if not chat_service.current_session_id:
+                    console.print(f"[{Colors.WARNING}]No active session[/]")
+                    continue
+                
+                sessions = chat_service.list_sessions()
+                current_session = None
+                for session in sessions:
+                    if session['id'] == chat_service.current_session_id:
+                        current_session = session
+                        break
+                
+                if current_session:
+                    console.print(f"\n[{Colors.BOLD}]Current Session Info:[/]")
+                    console.print(f"[{Colors.BOLD}]Name:[/] {current_session['name']}")
+                    console.print(f"[{Colors.BOLD}]ID:[/] {current_session['id']}")
+                    console.print(f"[{Colors.BOLD}]Created:[/] {current_session['created_at']}")
+                    console.print(f"[{Colors.BOLD}]Last Used:[/] {current_session['last_accessed_at']}")
+                    console.print(f"[{Colors.BOLD}]Codebase:[/] {current_session['codebase_path']}")
+                    console.print(f"[{Colors.BOLD}]Messages:[/] {len(chat_service.current_chat_history)} in conversation")
+                else:
+                    console.print(f"[{Colors.WARNING}]Session information not available[/]")
+                continue
+
+            if user_input.lower() == "history":
+                if not chat_service.current_chat_history:
+                    console.print(f"[{Colors.WARNING}]No conversation history in current session[/]")
+                    continue
+                
+                console.print(f"\n[{Colors.BOLD}]Recent Conversation History:[/]")
+                # Show last 10 messages
+                recent_messages = chat_service.current_chat_history[-10:]
+                for i, msg in enumerate(recent_messages):
+                    role = msg.get('role', 'unknown')
+                    content = msg.get('content', '')
+                    
+                    # Truncate long messages
+                    if len(content) > 100:
+                        content = content[:100] + "..."
+                    
+                    role_color = Colors.HIGHLIGHT if role == 'user' else Colors.SUCCESS
+                    console.print(f"[{role_color}]{role.capitalize()}:[/] {content}")
+                
+                if len(chat_service.current_chat_history) > 10:
+                    console.print(f"[{Colors.DIM}]... and {len(chat_service.current_chat_history) - 10} older messages[/]")
+                continue
+
+            if user_input.lower() == "export":
+                if not chat_service.current_chat_history:
+                    console.print(f"[{Colors.WARNING}]No conversation history to export[/]")
+                    continue
+                
+                # Generate filename with timestamp
+                import datetime
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"docstra_chat_{timestamp}.md"
+                
+                try:
+                    with open(filename, 'w', encoding='utf-8') as f:
+                        # Get session info
+                        sessions = chat_service.list_sessions()
+                        current_session = None
+                        for session in sessions:
+                            if session['id'] == chat_service.current_session_id:
+                                current_session = session
+                                break
+                        
+                        # Write header
+                        f.write(f"# Docstra Chat Export\n\n")
+                        if current_session:
+                            f.write(f"**Session:** {current_session['name']}\n")
+                            f.write(f"**Created:** {current_session['created_at']}\n")
+                            f.write(f"**Codebase:** {current_session['codebase_path']}\n")
+                        f.write(f"**Exported:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                        f.write("---\n\n")
+                        
+                        # Write conversation
+                        for msg in chat_service.current_chat_history:
+                            role = msg.get('role', 'unknown').capitalize()
+                            content = msg.get('content', '')
+                            f.write(f"## {role}\n\n{content}\n\n")
+                    
+                    console.print(f"[{Colors.SUCCESS}]Conversation exported to: {filename}[/]")
+                except Exception as e:
+                    console.print(f"[{Colors.ERROR}]Failed to export conversation: {e}[/]")
                 continue
 
             # Get response from the chat service
