@@ -181,7 +181,7 @@ def serve_documentation(docs_dir: str, port: int = 8000) -> None:
 # Initialize typer app
 app = typer.Typer(
     name="docstra",
-    help="LLM-powered code documentation assistant",
+    help="LLM-powered code documentation assistant with repository exploration and analysis",
     add_completion=False,
 )
 
@@ -578,11 +578,23 @@ def analyze(
     lines: Optional[str] = typer.Option(
         None, "--lines", "-l", help="Line range to analyze (e.g. '10-20')"
     ),
+    context: bool = typer.Option(
+        False, "--context", help="Include repository context in analysis"
+    ),
+    impact: bool = typer.Option(
+        False, "--impact", help="Show change impact analysis"
+    ),
+    complexity: bool = typer.Option(
+        False, "--complexity", help="Show detailed complexity metrics"
+    ),
+    relationships: bool = typer.Option(
+        False, "--relationships", help="Show file relationships"
+    ),
     config_path: Optional[str] = typer.Option(
         None, "--config", "-c", help="Path to the configuration file"
     ),
 ) -> None:
-    """Analyze a specific part of a file."""
+    """Analyze a specific part of a file with optional repository context."""
     # Initialize configuration
     config_manager = ConfigManager(config_path)
 
@@ -623,15 +635,63 @@ def analyze(
     else:
         code_to_analyze = document.content
 
+    # Get repository context if requested
+    repo_context = ""
+    if context or impact or complexity or relationships:
+        try:
+            from docstra.core.services.repository_explorer_service import RepositoryExplorerService
+            
+            user_config = load_or_init_config(config_path)
+            explorer_service = RepositoryExplorerService(user_config, console)
+            
+            file_relationships = explorer_service.get_file_relationships(file_path)
+            
+            # Build context information
+            context_parts = []
+            
+            if context:
+                context_parts.append(f"Repository Context for {os.path.basename(file_path)}:")
+                context_parts.append(f"- Module type: {file_relationships['complexity_info'].get('module_type', 'Unknown')}")
+                context_parts.append(f"- Dependencies: {len(file_relationships['dependencies'])} files")
+                context_parts.append(f"- Dependents: {len(file_relationships['dependents'])} files")
+                context_parts.append(f"- Related files: {len(file_relationships['related_files'])} files")
+                
+            if complexity:
+                complexity_info = file_relationships.get('complexity_info', {})
+                arch_info = file_relationships.get('architectural_info', {})
+                context_parts.append(f"Complexity Information:")
+                context_parts.append(f"- File complexity: {complexity_info.get('complexity', 'N/A')}")
+                context_parts.append(f"- File size: {complexity_info.get('size_kb', 0):.1f} KB")
+                context_parts.append(f"- Centrality score: {arch_info.get('centrality_score', 0)}")
+                context_parts.append(f"- Is core module: {arch_info.get('is_core_module', False)}")
+                
+            if relationships:
+                context_parts.append(f"Relationships:")
+                if file_relationships['dependencies']:
+                    context_parts.append(f"- Imports from: {', '.join([os.path.basename(d) for d in file_relationships['dependencies'][:5]])}")
+                if file_relationships['dependents']:
+                    context_parts.append(f"- Used by: {', '.join([os.path.basename(d) for d in file_relationships['dependents'][:5]])}")
+                    
+            repo_context = "\n".join(context_parts)
+            
+        except Exception as e:
+            console.print(f"[{Colors.WARNING}]Warning: Could not load repository context: {e}[/]")
+            repo_context = ""
+
     # Get LLM client
     llm_client = get_llm_client(config_manager)
+
+    # Build additional context
+    additional_context = f"File path: {file_path}, Lines: {start_line}-{end_line}"
+    if repo_context:
+        additional_context += f"\n\n{repo_context}"
 
     # Analyze the code
     with console.status(f"[{Colors.INFO}]Analyzing code...", spinner="dots"):
         analysis = llm_client.explain_code(
             code=code_to_analyze,
             language=language,
-            additional_context=f"File path: {file_path}, Lines: {start_line}-{end_line}",
+            additional_context=additional_context,
         )
         # Ensure analysis is a string
         analysis_str = str(analysis)
@@ -644,6 +704,39 @@ def analyze(
             title=f"Analysis of {os.path.basename(file_path)}{line_info}",
         )
     )
+    
+    # Show additional repository information if requested
+    if (context or impact or complexity or relationships) and 'explorer_service' in locals():
+        try:
+            if impact and explorer_service.repo_map:
+                # Show change impact analysis
+                console.print(f"\n[{Colors.BOLD}]Change Impact Analysis:[/]")
+                impact_map = explorer_service.repo_map.get_change_impact_analysis([file_path])
+                impacted_files = impact_map.get(file_path, [])
+                
+                if impacted_files:
+                    impact_table = Table(title="Files that would be impacted by changes", 
+                                       show_header=True, header_style="bold orange")
+                    impact_table.add_column("Impacted File", style="orange")
+                    impact_table.add_column("Impact Type", style="yellow")
+                    
+                    for impacted_file in impacted_files[:10]:
+                        impact_table.add_row(os.path.basename(impacted_file), "Direct/Indirect dependency")
+                    
+                    console.print(impact_table)
+                    
+                    if len(impacted_files) > 10:
+                        console.print(f"[{Colors.DIM}]... and {len(impacted_files) - 10} more files[/]")
+                else:
+                    console.print(f"[{Colors.SUCCESS}]No files would be directly impacted by changes to this file[/]")
+                    
+            if relationships and file_relationships:
+                # Display detailed relationships
+                console.print(f"\n[{Colors.BOLD}]File Relationships:[/]")
+                explorer_service.display_file_relationships(file_relationships)
+                
+        except Exception as e:
+            console.print(f"[{Colors.WARNING}]Warning: Could not display additional analysis: {e}[/]")
 
 
 @app.command()
@@ -975,6 +1068,263 @@ def create_services_for_config(user_config: UserConfig) -> tuple:
 config_service = ConfigService(console=console)
 init_service = InitializationService(console=console)
 
+# New CLI commands for incremental documentation
+@app.command()
+def update(
+    path: str = typer.Argument(".", help="Path to the codebase to update documentation for"),
+    base_ref: str = typer.Option(
+        "HEAD~1", "--base", "-b", help="Git reference to compare against for changes"
+    ),
+    force_files: List[str] = typer.Option(
+        [], "--force", "-f", help="Force regeneration for specific files"
+    ),
+    output_dir: str = typer.Option(
+        None, "--output", "-o", help="Output directory for documentation"
+    ),
+    config_path: Optional[str] = typer.Option(
+        None, "--config", "-c", help="Path to the configuration file"
+    ),
+    serve: bool = typer.Option(
+        False, "--serve", "-s", help="Serve documentation after update"
+    ),
+    port: int = typer.Option(
+        8000, "--port", "-p", help="Port to serve documentation on"
+    ),
+) -> None:
+    """Update documentation incrementally based on detected changes."""
+    display_docstra_header()
+    
+    user_config = load_or_init_config(config_path)
+    console.print(f"[{Colors.INFO_BOLD}]Starting incremental documentation update...[/]")
+    
+    try:
+        doc_service = DocumentationService(user_config, console)
+        
+        success = doc_service.generate_incremental_documentation(
+            input_path_str=path,
+            output_dir_str=output_dir,
+            base_ref=base_ref,
+            force_files=force_files if force_files else None,
+        )
+        
+        if success:
+            console.print(f"[{Colors.SUCCESS_BOLD}]Documentation update completed successfully![/]")
+            
+            if serve:
+                output_dir_path = Path(output_dir) if output_dir else Path(path) / "docs"
+                serve_documentation_from_generator(str(output_dir_path), port)
+        else:
+            console.print(f"[{Colors.ERROR_BOLD}]Documentation update failed.[/]")
+            raise typer.Exit(1)
+            
+    except Exception as e:
+        console.print(f"[{Colors.ERROR_BOLD}]Error during documentation update: {e}[/]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def status(
+    path: str = typer.Argument(".", help="Path to the codebase to check status for"),
+    config_path: Optional[str] = typer.Option(
+        None, "--config", "-c", help="Path to the configuration file"
+    ),
+    detailed: bool = typer.Option(
+        False, "--detailed", "-d", help="Show detailed status information"
+    ),
+) -> None:
+    """Show documentation status and pending changes."""
+    display_docstra_header()
+    
+    user_config = load_or_init_config(config_path)
+    
+    try:
+        doc_service = DocumentationService(user_config, console)
+        status_info = doc_service.get_documentation_status(path)
+        
+        # Display status table
+        status_table = Table(title="Documentation Status", show_header=True, header_style="bold magenta")
+        status_table.add_column("Metric", style="cyan")
+        status_table.add_column("Value", style="green")
+        
+        # Basic status
+        status_table.add_row("Codebase Path", status_info["codebase_path"])
+        
+        if status_info["last_generation"]:
+            import datetime
+            last_gen_time = datetime.datetime.fromtimestamp(status_info["last_generation"]["timestamp"])
+            status_table.add_row("Last Generation", last_gen_time.strftime("%Y-%m-%d %H:%M:%S"))
+            status_table.add_row("Total Files at Last Gen", str(status_info["last_generation"]["total_files"]))
+        else:
+            status_table.add_row("Last Generation", "Never")
+        
+        # Current changes
+        changes = status_info["current_changes"]
+        status_table.add_row("Has Changes", "Yes" if changes["has_changes"] else "No")
+        status_table.add_row("Total Changes", str(changes["total_changes"]))
+        status_table.add_row("Changed Files", str(changes["changed_files"]))
+        status_table.add_row("New Files", str(changes["new_files"]))
+        status_table.add_row("Deleted Files", str(changes["deleted_files"]))
+        
+        # Dependencies and overrides
+        dep_stats = status_info["dependency_stats"]
+        status_table.add_row("Tracked Documents", str(dep_stats["total_docs"]))
+        status_table.add_row("Total Source Files", str(dep_stats["total_source_files"]))
+        
+        override_stats = status_info["override_stats"]
+        status_table.add_row("Active Overrides", str(override_stats["total"]))
+        
+        # Outdated docs
+        outdated_count = len(status_info["outdated_docs"])
+        status_table.add_row("Outdated Documents", str(outdated_count))
+        
+        console.print(status_table)
+        
+        if detailed:
+            # Show detailed information
+            if status_info["outdated_docs"]:
+                console.print(f"\n[{Colors.WARNING_BOLD}]Outdated Documents:[/]")
+                for doc in status_info["outdated_docs"][:10]:  # Show first 10
+                    console.print(f"  • {doc}")
+                if len(status_info["outdated_docs"]) > 10:
+                    console.print(f"  ... and {len(status_info['outdated_docs']) - 10} more")
+            
+            if override_stats["by_type"]:
+                console.print(f"\n[{Colors.INFO_BOLD}]Overrides by Type:[/]")
+                for override_type, count in override_stats["by_type"].items():
+                    console.print(f"  • {override_type}: {count}")
+            
+            if status_info["change_history"]:
+                console.print(f"\n[{Colors.INFO_BOLD}]Recent Change History:[/]")
+                for i, change in enumerate(status_info["change_history"][-5:]):
+                    import datetime
+                    change_time = datetime.datetime.fromtimestamp(change["change_timestamp"])
+                    console.print(f"  {i+1}. {change_time.strftime('%Y-%m-%d %H:%M')} - {change['total_changes']} changes")
+        
+        # Suggest actions
+        if changes["has_changes"]:
+            console.print(f"\n[{Colors.HIGHLIGHT_BOLD}]💡 Suggestion:[/] Run `docstra update` to update documentation for recent changes.")
+        else:
+            console.print(f"\n[{Colors.SUCCESS}]✅ Documentation is up to date![/]")
+            
+    except Exception as e:
+        console.print(f"[{Colors.ERROR_BOLD}]Error getting documentation status: {e}[/]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def override(
+    action: str = typer.Argument(..., help="Action: set, remove, list"),
+    file_path: Optional[str] = typer.Argument(None, help="File path to override"),
+    override_type: Optional[str] = typer.Option(
+        None, "--type", "-t", help="Override type: skip, template, content"
+    ),
+    content: Optional[str] = typer.Option(
+        None, "--content", "-c", help="Custom content or template"
+    ),
+    description: Optional[str] = typer.Option(
+        None, "--description", "-d", help="Description of the override"
+    ),
+    config_path: Optional[str] = typer.Option(
+        None, "--config", help="Path to the configuration file"
+    ),
+    codebase_path: str = typer.Option(
+        ".", "--codebase", help="Path to the codebase"
+    ),
+) -> None:
+    """Manage documentation generation overrides for specific files."""
+    display_docstra_header()
+    
+    user_config = load_or_init_config(config_path)
+    
+    # Setup persist directory
+    input_path_abs = Path(codebase_path).resolve()
+    persist_dir_name = user_config.storage.persist_directory
+    base_persist_path = Path(persist_dir_name)
+    if not base_persist_path.is_absolute():
+        base_persist_path = input_path_abs / persist_dir_name
+    abs_persist_directory = base_persist_path.resolve()
+    
+    from docstra.core.documentation.overrides import DocumentationOverrideManager
+    override_manager = DocumentationOverrideManager(str(abs_persist_directory))
+    
+    try:
+        if action == "set":
+            if not file_path or not override_type:
+                console.print(f"[{Colors.ERROR_BOLD}]Error: file_path and --type are required for 'set' action[/]")
+                raise typer.Exit(1)
+            
+            # Resolve file path
+            if not Path(file_path).is_absolute():
+                file_path = str((input_path_abs / file_path).resolve())
+            
+            if override_type == "skip":
+                override_manager.set_skip_override(file_path, description)
+                console.print(f"[{Colors.SUCCESS}]✅ Set skip override for {file_path}[/]")
+            elif override_type == "template":
+                if not content:
+                    console.print(f"[{Colors.ERROR_BOLD}]Error: --content is required for template override[/]")
+                    raise typer.Exit(1)
+                override_manager.set_template_override(file_path, content, description)
+                console.print(f"[{Colors.SUCCESS}]✅ Set template override for {file_path}[/]")
+            elif override_type == "content":
+                if not content:
+                    console.print(f"[{Colors.ERROR_BOLD}]Error: --content is required for content override[/]")
+                    raise typer.Exit(1)
+                override_manager.set_manual_content_override(file_path, content, description)
+                console.print(f"[{Colors.SUCCESS}]✅ Set content override for {file_path}[/]")
+            else:
+                console.print(f"[{Colors.ERROR_BOLD}]Error: Invalid override type. Use: skip, template, content[/]")
+                raise typer.Exit(1)
+        
+        elif action == "remove":
+            if not file_path:
+                console.print(f"[{Colors.ERROR_BOLD}]Error: file_path is required for 'remove' action[/]")
+                raise typer.Exit(1)
+            
+            # Resolve file path
+            if not Path(file_path).is_absolute():
+                file_path = str((input_path_abs / file_path).resolve())
+            
+            if override_manager.remove_override(file_path):
+                console.print(f"[{Colors.SUCCESS}]✅ Removed override for {file_path}[/]")
+            else:
+                console.print(f"[{Colors.WARNING}]⚠️  No override found for {file_path}[/]")
+        
+        elif action == "list":
+            overrides = override_manager.list_overrides(override_type)
+            
+            if not overrides:
+                console.print(f"[{Colors.INFO}]No overrides found.[/]")
+                return
+            
+            # Display overrides table
+            override_table = Table(title="Documentation Overrides", show_header=True, header_style="bold magenta")
+            override_table.add_column("File Path", style="cyan")
+            override_table.add_column("Type", style="yellow")
+            override_table.add_column("Description", style="white")
+            override_table.add_column("Created", style="dim")
+            
+            for override in overrides:
+                import datetime
+                created_time = datetime.datetime.fromtimestamp(override.created_at)
+                override_table.add_row(
+                    override.file_path,
+                    override.override_type,
+                    override.description or "No description",
+                    created_time.strftime("%Y-%m-%d %H:%M")
+                )
+            
+            console.print(override_table)
+        
+        else:
+            console.print(f"[{Colors.ERROR_BOLD}]Error: Invalid action. Use: set, remove, list[/]")
+            raise typer.Exit(1)
+            
+    except Exception as e:
+        console.print(f"[{Colors.ERROR_BOLD}]Error managing overrides: {e}[/]")
+        raise typer.Exit(1)
+
+
 # Add ingest command - separate from init according to refactoring plan
 @app.command()
 def ingest(
@@ -1138,8 +1488,20 @@ def query(
     n_results: int = typer.Option(
         5, "--results", "-n", help="Number of results to retrieve"
     ),
+    query_type: Optional[str] = typer.Option(
+        None, "--type", help="Query type: architectural, implementation, usage"
+    ),
+    symbols_only: bool = typer.Option(
+        False, "--symbols-only", help="Search symbols only"
+    ),
+    with_context: bool = typer.Option(
+        True, "--context/--no-context", help="Include repository context in answer"
+    ),
+    detailed: bool = typer.Option(
+        False, "--detailed", help="Show detailed analysis and relationships"
+    ),
 ) -> None:
-    """Ask a question about the codebase and get a precise answer."""
+    """Ask a question about the codebase and get a precise answer with enhanced context."""
     # Get configuration
     user_config = load_or_init_config(config_path)
 
@@ -1155,9 +1517,26 @@ def query(
                 console.print(f"[{Colors.ERROR_BOLD}]Error:[/] {message}")
                 raise typer.Exit(code=1)
 
+    # Enhanced query with repository context
+    enhanced_question = question
+    
+    # Add query type context if specified
+    if query_type:
+        if query_type.lower() == "architectural":
+            enhanced_question = f"From an architectural perspective: {question}"
+        elif query_type.lower() == "implementation":
+            enhanced_question = f"From an implementation detail perspective: {question}"
+        elif query_type.lower() == "usage":
+            enhanced_question = f"From a usage and examples perspective: {question}"
+
+    # Modify number of results based on symbols_only flag
+    search_results = n_results
+    if symbols_only:
+        search_results = min(n_results * 2, 15)  # Get more results to filter for symbols
+
     # Call answer_question with the right parameters
     answer, sources = query_service_with_config.answer_question(
-        question=question, codebase_path_str=codebase_path, n_results=n_results
+        question=enhanced_question, codebase_path_str=codebase_path, n_results=search_results
     )
 
     # Postprocess the answer to add clickable links
@@ -1180,6 +1559,63 @@ def query(
                 abs_path = filepath
             link_str = format_file_link(abs_path, start_line, end_line)
             console.print(f"[{Colors.BOLD}]{i + 1}.[/] {link_str}")
+
+    # Show detailed analysis if requested
+    if detailed and with_context:
+        try:
+            from docstra.core.services.repository_explorer_service import RepositoryExplorerService
+            
+            explorer_service = RepositoryExplorerService(user_config, console)
+            
+            # Show repository context for the question
+            console.print(f"\n[{Colors.BOLD}]Repository Context Analysis:[/]")
+            
+            # If sources mention specific files, show their relationships
+            mentioned_files = []
+            for source in sources[:3]:  # Analyze top 3 sources
+                meta = source.get("metadata", {})
+                filepath = meta.get("document_id")
+                if filepath and os.path.exists(filepath):
+                    mentioned_files.append(filepath)
+            
+            if mentioned_files:
+                console.print(f"\n[{Colors.INFO_BOLD}]Key Files in Answer:[/]")
+                
+                for file_path in mentioned_files:
+                    try:
+                        relationships = explorer_service.get_file_relationships(file_path)
+                        
+                        # Show brief file context
+                        file_table = Table(title=f"Context for {os.path.basename(file_path)}", 
+                                         show_header=True, header_style="bold cyan")
+                        file_table.add_column("Aspect", style="cyan")
+                        file_table.add_column("Details", style="white")
+                        
+                        complexity_info = relationships.get('complexity_info', {})
+                        arch_info = relationships.get('architectural_info', {})
+                        
+                        file_table.add_row("Module Type", complexity_info.get('module_type', 'Unknown'))
+                        file_table.add_row("Dependencies", str(len(relationships.get('dependencies', []))))
+                        file_table.add_row("Dependents", str(len(relationships.get('dependents', []))))
+                        file_table.add_row("Core Module", "Yes" if arch_info.get('is_core_module', False) else "No")
+                        
+                        console.print(file_table)
+                        
+                    except Exception as e:
+                        console.print(f"[{Colors.DIM}]Could not analyze {os.path.basename(file_path)}: {e}[/]")
+                        
+        except Exception as e:
+            console.print(f"[{Colors.WARNING}]Could not load detailed context: {e}[/]")
+
+    # Add query suggestions based on the current question
+    if with_context:
+        console.print(f"\n[{Colors.DIM}]💡 Try these related queries:[/]")
+        if query_type != "architectural":
+            console.print(f"[{Colors.DIM}]• docstra query \"{question}\" --type architectural[/]")
+        if query_type != "implementation":
+            console.print(f"[{Colors.DIM}]• docstra query \"{question}\" --type implementation[/]")
+        if not symbols_only:
+            console.print(f"[{Colors.DIM}]• docstra query \"{question}\" --symbols-only[/]")
 
     # Display token usage statistics if tracking is enabled
     llm_tracker = get_llm_tracker()
@@ -1458,6 +1894,516 @@ def usage(
     # Show embedding usage information
     console.print(f"\n[{Colors.DIM}]Note: Embedding usage during ingestion is shown at the end of the ingestion process.[/]")
     console.print(f"[{Colors.DIM}]For current session embedding costs, check the output of 'docstra ingest'.[/]")
+
+
+@app.command()
+def explore(
+    path: str = typer.Argument(".", help="Path to explore"),
+    tree: bool = typer.Option(False, "--tree", help="Show as tree structure"),
+    dependencies: Optional[str] = typer.Option(None, "--dependencies", help="Show dependencies for file"),
+    dependents: Optional[str] = typer.Option(None, "--dependents", help="Show dependents for file"),
+    related: Optional[str] = typer.Option(None, "--related", help="Show related files"),
+    symbols: Optional[str] = typer.Option(None, "--symbols", help="Show symbols in file"),
+    structure: bool = typer.Option(False, "--structure", help="Show module structure"),
+    depth: int = typer.Option(3, "--depth", help="Maximum depth to explore"),
+    category: Optional[str] = typer.Option(None, "--category", help="Filter by module category"),
+    format_type: str = typer.Option("table", "--format", help="Output format (table, json, tree)"),
+    config_path: Optional[str] = typer.Option(None, "--config", "-c", help="Configuration file path"),
+) -> None:
+    """Explore repository structure and relationships."""
+    from docstra.core.services.repository_explorer_service import RepositoryExplorerService
+    
+    display_docstra_header()
+    
+    try:
+        user_config = load_or_init_config(config_path)
+        explorer_service = RepositoryExplorerService(user_config, console)
+
+        if dependencies:
+            # Show dependencies for a specific file
+            console.print(f"[{Colors.INFO_BOLD}]Analyzing dependencies for:[/] {dependencies}")
+            relationships = explorer_service.get_file_relationships(dependencies)
+            explorer_service.display_file_relationships(relationships)
+            
+        elif dependents:
+            # Show dependents for a specific file  
+            console.print(f"[{Colors.INFO_BOLD}]Analyzing dependents for:[/] {dependents}")
+            relationships = explorer_service.get_file_relationships(dependents)
+            
+            # Create a table specifically for dependents
+            if relationships["dependents"]:
+                deps_table = Table(title=f"Files that depend on {os.path.basename(dependents)}", 
+                                 show_header=True, header_style="bold green")
+                deps_table.add_column("File", style="green")
+                deps_table.add_column("Full Path", style="dim")
+                
+                for dep in relationships["dependents"]:
+                    deps_table.add_row(os.path.basename(dep), dep)
+                
+                console.print(deps_table)
+            else:
+                console.print(f"[{Colors.WARNING}]No files depend on {dependents}[/]")
+            
+        elif related:
+            # Show related files
+            console.print(f"[{Colors.INFO_BOLD}]Finding files related to:[/] {related}")
+            relationships = explorer_service.get_file_relationships(related)
+            
+            if relationships["related_files"]:
+                related_table = Table(title=f"Files related to {os.path.basename(related)}", 
+                                    show_header=True, header_style="bold cyan")
+                related_table.add_column("File", style="cyan")
+                related_table.add_column("Full Path", style="dim")
+                
+                for rel_file in relationships["related_files"]:
+                    related_table.add_row(
+                        os.path.basename(rel_file),
+                        rel_file
+                    )
+                
+                console.print(related_table)
+            else:
+                console.print(f"[{Colors.WARNING}]No related files found for {related}[/]")
+            
+        elif symbols:
+            # Show symbols in file
+            console.print(f"[{Colors.INFO_BOLD}]Analyzing symbols in:[/] {symbols}")
+            relationships = explorer_service.get_file_relationships(symbols)
+            
+            if relationships["symbols"]:
+                symbols_table = Table(title=f"Symbols in {os.path.basename(symbols)}", 
+                                    show_header=True, header_style="bold magenta")
+                symbols_table.add_column("Symbol", style="magenta")
+                symbols_table.add_column("Type", style="yellow")
+                
+                # Get detailed symbol info from code index if available
+                file_metadata = explorer_service.code_index.get_file_metadata(symbols) if explorer_service.code_index else None
+                
+                if file_metadata:
+                    for function in file_metadata.get("functions", []):
+                        symbols_table.add_row(function, "Function")
+                    for class_name in file_metadata.get("classes", []):
+                        symbols_table.add_row(class_name, "Class")
+                else:
+                    for symbol in relationships["symbols"]:
+                        symbols_table.add_row(symbol, "Symbol")
+                
+                console.print(symbols_table)
+            else:
+                console.print(f"[{Colors.WARNING}]No symbols found in {symbols}[/]")
+            
+        else:
+            # Show general structure
+            console.print(f"[{Colors.INFO_BOLD}]Exploring repository structure:[/] {path}")
+            
+            if structure or tree:
+                structure_data = explorer_service.explore_structure(path, depth, tree)
+                
+                if tree and "tree" in structure_data:
+                    # Display as Rich tree
+                    from rich.tree import Tree
+                    repo_tree = Tree(f"[{Colors.BOLD}]Repository: {os.path.basename(path)}[/]")
+                    _build_rich_tree(structure_data["tree"], repo_tree)
+                    console.print(repo_tree)
+                    
+                elif "flat" in structure_data:
+                    flat_data = structure_data["flat"]
+                    
+                    # Show directory summary
+                    if flat_data["directories"]:
+                        dir_table = Table(title="Directories", show_header=True, header_style="bold blue")
+                        dir_table.add_column("Directory", style="blue")
+                        dir_table.add_column("Files", justify="right", style="green")
+                        dir_table.add_column("Depth", justify="right", style="dim")
+                        
+                        for directory in flat_data["directories"][:20]:  # Show first 20
+                            dir_table.add_row(
+                                os.path.basename(directory["name"]) or ".",
+                                str(directory["children_count"]),
+                                str(directory["depth"])
+                            )
+                        
+                        console.print(dir_table)
+                    
+                    # Show file summary  
+                    if flat_data["files"]:
+                        file_table = Table(title="Files", show_header=True, header_style="bold green")
+                        file_table.add_column("File", style="green")
+                        file_table.add_column("Language", style="yellow")
+                        file_table.add_column("Size", justify="right", style="cyan")
+                        file_table.add_column("Symbols", justify="right", style="magenta")
+                        
+                        for file_info in flat_data["files"][:20]:  # Show first 20
+                            size_str = f"{file_info['size'] / 1024:.1f}KB" if file_info['size'] else "N/A"
+                            file_table.add_row(
+                                os.path.basename(file_info["name"]),
+                                file_info["language"] or "Unknown",
+                                size_str,
+                                str(file_info["symbols"])
+                            )
+                        
+                        if len(flat_data["files"]) > 20:
+                            console.print(f"[{Colors.DIM}]... and {len(flat_data['files']) - 20} more files[/]")
+                        
+                        console.print(file_table)
+            else:
+                # Default overview
+                structure_data = explorer_service.explore_structure(path, depth, False)
+                stats = structure_data.get("statistics", {})
+                
+                overview_table = Table(title="Repository Overview", show_header=True, header_style="bold cyan")
+                overview_table.add_column("Metric", style="cyan")
+                overview_table.add_column("Value", justify="right", style="white")
+                
+                overview_table.add_row("Total Files", str(stats.get("total_files", 0)))
+                overview_table.add_row("Total Lines", f"{stats.get('total_lines', 0):,}")
+                overview_table.add_row("Languages", str(len(stats.get("languages", {}))))
+                overview_table.add_row("Modules", str(len(stats.get("module_sizes", {}))))
+                
+                console.print(overview_table)
+                
+                # Show language breakdown
+                languages = stats.get("languages", {})
+                if languages:
+                    lang_table = Table(title="Languages", show_header=True, header_style="bold yellow")
+                    lang_table.add_column("Language", style="yellow")
+                    lang_table.add_column("Files", justify="right", style="green")
+                    
+                    for language, count in sorted(languages.items(), key=lambda x: x[1], reverse=True):
+                        lang_table.add_row(language, str(count))
+                    
+                    console.print(lang_table)
+                    
+    except Exception as e:
+        console.print(f"[{Colors.ERROR_BOLD}]Error exploring repository: {e}[/]")
+        raise typer.Exit(1)
+
+
+def _build_rich_tree(node_data: Dict[str, Any], tree) -> None:
+    """Build Rich tree from node data recursively.
+    
+    Args:
+        node_data: Node data dictionary
+        tree: Rich tree object to add to
+    """
+    if "children" in node_data:
+        for name, child_data in node_data["children"].items():
+            if child_data.get("type") == "file":
+                language = child_data.get("language", "")
+                symbols = child_data.get("symbols", 0)
+                branch = tree.add(f"[{Colors.SUCCESS}]📄 {name}[/] [{Colors.DIM}]({language}, {symbols} symbols)[/]")
+            else:
+                branch = tree.add(f"[{Colors.HIGHLIGHT}]📁 {name}[/]")
+                if "children" in child_data:
+                    _build_rich_tree(child_data, branch)
+
+
+@app.command()
+def metrics(
+    overview: bool = typer.Option(False, "--overview", help="Show repository overview"),
+    complexity: bool = typer.Option(False, "--complexity", help="Show complexity analysis"),
+    by_module: bool = typer.Option(False, "--by-module", help="Group metrics by module"),
+    dependencies: bool = typer.Option(False, "--dependencies", help="Analyze dependencies"),
+    cycles: bool = typer.Option(False, "--cycles", help="Find dependency cycles"),
+    coupling: bool = typer.Option(False, "--coupling", help="Analyze module coupling"),
+    export: Optional[str] = typer.Option(None, "--export", help="Export metrics to file"),
+    config_path: Optional[str] = typer.Option(None, "--config", "-c", help="Configuration file path"),
+    codebase_path: str = typer.Option(".", "--codebase", help="Path to codebase"),
+) -> None:
+    """Generate comprehensive code metrics and analysis."""
+    from docstra.core.services.repository_explorer_service import RepositoryExplorerService
+    from docstra.core.services.metrics_service import MetricsService
+    
+    display_docstra_header()
+    
+    try:
+        user_config = load_or_init_config(config_path)
+        
+        # Load repository components
+        explorer_service = RepositoryExplorerService(user_config, console)
+        explorer_service._load_components(codebase_path)
+        
+        if not explorer_service.repo_map or not explorer_service.code_index:
+            console.print(f"[{Colors.ERROR_BOLD}]Repository not indexed. Run 'docstra ingest' first.[/]")
+            raise typer.Exit(1)
+        
+        metrics_service = MetricsService(explorer_service.repo_map, explorer_service.code_index, console)
+        
+        if overview:
+            console.print(f"[{Colors.INFO_BOLD}]Calculating repository overview...[/]")
+            metrics_data = metrics_service.calculate_repository_overview()
+            metrics_service.display_repository_overview(metrics_data)
+            
+        elif cycles:
+            console.print(f"[{Colors.INFO_BOLD}]Detecting dependency cycles...[/]")
+            cycles_found = metrics_service.detect_dependency_cycles()
+            metrics_service.display_dependency_cycles(cycles_found)
+            
+        elif complexity:
+            console.print(f"[{Colors.INFO_BOLD}]Analyzing code complexity...[/]")
+            metrics_data = metrics_service.calculate_repository_overview()
+            complexity_analysis = metrics_data["complexity_analysis"]
+            
+            # Display complexity metrics
+            complexity_table = Table(title="Complexity Analysis", show_header=True, header_style="bold red")
+            complexity_table.add_column("Metric", style="red")
+            complexity_table.add_column("Value", justify="right", style="white")
+            
+            complexity_table.add_row("Total Files", str(complexity_analysis.get("total_files", 0)))
+            complexity_table.add_row("Average Complexity", f"{complexity_analysis.get('average_complexity', 0):.2f}")
+            complexity_table.add_row("Max Complexity", str(complexity_analysis.get("max_complexity", 0)))
+            complexity_table.add_row("High Complexity Files", str(complexity_analysis.get("high_complexity_files", 0)))
+            
+            console.print(complexity_table)
+            
+            # Show complexity distribution
+            distribution = complexity_analysis.get("complexity_distribution", {})
+            if distribution:
+                dist_table = Table(title="Complexity Distribution", show_header=True, header_style="bold orange")
+                dist_table.add_column("Range", style="orange")
+                dist_table.add_column("Files", justify="right", style="white")
+                
+                for range_name, count in distribution.items():
+                    dist_table.add_row(range_name, str(count))
+                
+                console.print(dist_table)
+                
+        elif dependencies:
+            console.print(f"[{Colors.INFO_BOLD}]Analyzing dependencies...[/]")
+            metrics_data = metrics_service.calculate_repository_overview()
+            dep_analysis = metrics_data["dependency_analysis"]
+            
+            # Display dependency metrics
+            dep_table = Table(title="Dependency Analysis", show_header=True, header_style="bold cyan")
+            dep_table.add_column("Metric", style="cyan")
+            dep_table.add_column("Value", justify="right", style="white")
+            
+            dep_table.add_row("Files with Dependencies", str(dep_analysis.get("total_files_with_deps", 0)))
+            dep_table.add_row("Total Dependencies", str(dep_analysis.get("total_dependencies", 0)))
+            dep_table.add_row("Avg Dependencies per File", f"{dep_analysis.get('average_dependencies_per_file', 0):.2f}")
+            dep_table.add_row("Dependency Cycles", str(len(dep_analysis.get("dependency_cycles", []))))
+            
+            console.print(dep_table)
+            
+            # Show highly coupled files
+            highly_coupled = dep_analysis.get("highly_coupled_files", [])
+            if highly_coupled:
+                coupled_table = Table(title="Highly Coupled Files", show_header=True, header_style="bold yellow")
+                coupled_table.add_column("File", style="yellow")
+                coupled_table.add_column("Dependencies", justify="right", style="red")
+                
+                for file_info in highly_coupled[:10]:
+                    coupled_table.add_row(
+                        os.path.basename(file_info["file"]),
+                        str(file_info["dependency_count"])
+                    )
+                
+                console.print(coupled_table)
+            
+        elif by_module:
+            console.print(f"[{Colors.INFO_BOLD}]Analyzing metrics by module...[/]")
+            metrics_data = metrics_service.calculate_repository_overview()
+            module_breakdown = metrics_data["module_breakdown"]
+            
+            # Display module breakdown
+            module_table = Table(title="Module Breakdown", show_header=True, header_style="bold green")
+            module_table.add_column("Module Category", style="green")
+            module_table.add_column("Files", justify="right", style="cyan")
+            module_table.add_column("Languages", style="yellow")
+            module_table.add_column("Total Symbols", justify="right", style="magenta")
+            module_table.add_column("Avg Symbols/File", justify="right", style="white")
+            
+            for category, data in module_breakdown.items():
+                languages_str = ", ".join(data["languages"][:3])  # Show first 3 languages
+                if len(data["languages"]) > 3:
+                    languages_str += f" (+{len(data['languages']) - 3})"
+                
+                module_table.add_row(
+                    category,
+                    str(data["file_count"]),
+                    languages_str,
+                    str(data["total_symbols"]),
+                    f"{data['avg_symbols_per_file']:.1f}"
+                )
+            
+            console.print(module_table)
+            
+        else:
+            # Default: show basic metrics overview
+            console.print(f"[{Colors.INFO_BOLD}]Calculating basic metrics...[/]")
+            metrics_data = metrics_service.calculate_repository_overview()
+            
+            # Show repository statistics
+            metrics_service.display_repository_overview(metrics_data)
+            
+            # Show brief complexity info
+            complexity_analysis = metrics_data["complexity_analysis"]
+            if complexity_analysis.get("total_files", 0) > 0:
+                console.print(f"\n[{Colors.BOLD}]Complexity Summary:[/]")
+                console.print(f"  • Average complexity: [{Colors.HIGHLIGHT}]{complexity_analysis.get('average_complexity', 0):.2f}[/]")
+                console.print(f"  • High complexity files: [{Colors.WARNING}]{complexity_analysis.get('high_complexity_files', 0)}[/]")
+            
+            # Show dependency cycles if any
+            dep_analysis = metrics_data["dependency_analysis"]
+            cycle_count = len(dep_analysis.get("dependency_cycles", []))
+            if cycle_count > 0:
+                console.print(f"\n[{Colors.WARNING_BOLD}]⚠️  Found {cycle_count} dependency cycles![/]")
+                console.print(f"[{Colors.DIM}]Run with --cycles to see details[/]")
+            else:
+                console.print(f"\n[{Colors.SUCCESS}]✅ No dependency cycles detected[/]")
+        
+        # Export metrics if requested
+        if export:
+            import json
+            metrics_data = metrics_service.calculate_repository_overview()
+            
+            try:
+                with open(export, 'w') as f:
+                    json.dump(metrics_data, f, indent=2, default=str)
+                console.print(f"\n[{Colors.SUCCESS}]📄 Metrics exported to: {export}[/]")
+            except Exception as e:
+                console.print(f"\n[{Colors.ERROR}]Failed to export metrics: {e}[/]")
+                
+    except Exception as e:
+        console.print(f"[{Colors.ERROR_BOLD}]Error calculating metrics: {e}[/]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def search(
+    pattern: str = typer.Argument(..., help="Pattern to search for"),
+    regex: bool = typer.Option(False, "--regex", help="Use regex pattern search"),
+    symbols: bool = typer.Option(False, "--symbols", help="Search in symbols only"),
+    semantic: bool = typer.Option(False, "--semantic", help="Use semantic search"),
+    symbol: Optional[str] = typer.Option(None, "--symbol", help="Search for specific symbol"),
+    imports: Optional[str] = typer.Option(None, "--imports", help="Find import usages"),
+    similar: Optional[str] = typer.Option(None, "--similar", help="Find files similar to given file"),
+    config_path: Optional[str] = typer.Option(None, "--config", "-c", help="Configuration file path"),
+    codebase_path: str = typer.Option(".", "--codebase", help="Path to codebase"),
+    n_results: int = typer.Option(10, "--results", "-n", help="Number of results to show"),
+) -> None:
+    """Specialized search command for finding code elements."""
+    from docstra.core.services.repository_explorer_service import RepositoryExplorerService
+    
+    display_docstra_header()
+    
+    try:
+        user_config = load_or_init_config(config_path)
+        
+        # Load repository components
+        explorer_service = RepositoryExplorerService(user_config, console)
+        explorer_service._load_components(codebase_path)
+        
+        if not explorer_service.code_index:
+            console.print(f"[{Colors.ERROR_BOLD}]Code index not available. Run 'docstra ingest' first.[/]")
+            raise typer.Exit(1)
+        
+        if symbol:
+            # Search for specific symbol
+            console.print(f"[{Colors.INFO_BOLD}]Searching for symbol:[/] {symbol}")
+            results = explorer_service.code_index.search_symbol(symbol)
+            
+            if results:
+                symbol_table = Table(title=f"Symbol '{symbol}' found in:", show_header=True, header_style="bold magenta")
+                symbol_table.add_column("File", style="magenta")
+                symbol_table.add_column("Line", justify="right", style="cyan")
+                symbol_table.add_column("Language", style="yellow")
+                
+                for result in results[:n_results]:
+                    symbol_table.add_row(
+                        os.path.basename(result["filepath"]),
+                        str(result.get("line", "N/A")),
+                        result.get("language", "Unknown")
+                    )
+                
+                console.print(symbol_table)
+                
+                if len(results) > n_results:
+                    console.print(f"[{Colors.DIM}]... and {len(results) - n_results} more results[/]")
+            else:
+                console.print(f"[{Colors.WARNING}]Symbol '{symbol}' not found[/]")
+        
+        elif imports:
+            # Search for import usages
+            console.print(f"[{Colors.INFO_BOLD}]Searching for import:[/] {imports}")
+            import_results = explorer_service.code_index.search_files_by_import(imports)
+            
+            if import_results:
+                import_table = Table(title=f"Files importing '{imports}':", show_header=True, header_style="bold cyan")
+                import_table.add_column("File", style="cyan")
+                import_table.add_column("Full Path", style="dim")
+                
+                for result_file in import_results[:n_results]:
+                    import_table.add_row(
+                        os.path.basename(result_file),
+                        result_file
+                    )
+                
+                console.print(import_table)
+                
+                if len(import_results) > n_results:
+                    console.print(f"[{Colors.DIM}]... and {len(import_results) - n_results} more results[/]")
+            else:
+                console.print(f"[{Colors.WARNING}]Import '{imports}' not found[/]")
+        
+        elif similar:
+            # Find similar files
+            console.print(f"[{Colors.INFO_BOLD}]Finding files similar to:[/] {similar}")
+            related_files = explorer_service.code_index.get_related_files(similar)
+            
+            if related_files:
+                similar_table = Table(title=f"Files similar to '{os.path.basename(similar)}':", 
+                                    show_header=True, header_style="bold green")
+                similar_table.add_column("File", style="green")
+                similar_table.add_column("Full Path", style="dim")
+                
+                for similar_file in related_files[:n_results]:
+                    similar_table.add_row(
+                        os.path.basename(similar_file),
+                        similar_file
+                    )
+                
+                console.print(similar_table)
+                
+                if len(related_files) > n_results:
+                    console.print(f"[{Colors.DIM}]... and {len(related_files) - n_results} more results[/]")
+            else:
+                console.print(f"[{Colors.WARNING}]No files similar to '{similar}' found[/]")
+        
+        else:
+            # Full-text search
+            console.print(f"[{Colors.INFO_BOLD}]Searching for:[/] {pattern}")
+            results = explorer_service.code_index.full_text_search(pattern)
+            
+            if results:
+                search_table = Table(title=f"Search results for '{pattern}':", 
+                                   show_header=True, header_style="bold white")
+                search_table.add_column("File", style="white")
+                search_table.add_column("Language", style="yellow")
+                search_table.add_column("Matches", justify="right", style="green")
+                search_table.add_column("Sample Match", style="dim")
+                
+                for result in results[:n_results]:
+                    matches = result.get("matches", [])
+                    sample_match = matches[0]["line_content"][:50] + "..." if matches else ""
+                    
+                    search_table.add_row(
+                        os.path.basename(result["filepath"]),
+                        result.get("language", "Unknown"),
+                        str(len(matches)),
+                        sample_match
+                    )
+                
+                console.print(search_table)
+                
+                if len(results) > n_results:
+                    console.print(f"[{Colors.DIM}]... and {len(results) - n_results} more results[/]")
+            else:
+                console.print(f"[{Colors.WARNING}]Pattern '{pattern}' not found[/]")
+                
+    except Exception as e:
+        console.print(f"[{Colors.ERROR_BOLD}]Error during search: {e}[/]")
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":
