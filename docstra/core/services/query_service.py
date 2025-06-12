@@ -5,6 +5,7 @@ Service responsible for handling user queries against the indexed codebase.
 
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
+from contextlib import nullcontext
 
 from rich.console import Console
 
@@ -160,10 +161,24 @@ class QueryService:
             )
             
             # Initialize context-aware retriever
+            # Load repository map
+            repo_map = None
+            try:
+                from docstra.core.indexing.repo_map import RepositoryMap
+                repo_map_path = effective_persist_dir / "repo_map.json"
+                if repo_map_path.exists():
+                    # Create a new repository map and rebuild it with current index
+                    repo_map = RepositoryMap(str(abs_codebase_path), code_index_instance)
+                    if code_index_instance:
+                        repo_map.build()  # Rebuild with current index
+            except Exception as e:
+                self.console.print(f"[yellow]Warning: Could not load repository map: {e}[/yellow]")
+            
             self.context_aware_retriever = ContextAwareRetriever(
                 base_retriever=self.retriever,
                 budget_manager=self.budget_manager,
-                code_index=code_index_instance
+                code_index=code_index_instance,
+                repo_map=repo_map
             )
             
             self._retrieval_initialized_for_path = abs_codebase_path
@@ -179,7 +194,7 @@ class QueryService:
             raise
 
     def answer_question(
-        self, question: str, codebase_path_str: str, n_results: int = 5
+        self, question: str, codebase_path_str: str, n_results: int = 5, suppress_status: bool = False
     ) -> Tuple[str, List[Dict[str, Any]]]:
         """
         Answers a question about the codebase using context-aware retrieval and LLM.
@@ -194,18 +209,27 @@ class QueryService:
         if not self.context_aware_retriever:
             return "Error: Context-aware retriever not initialized.", []
 
-        # Show context information
+        # Show context information (only if not suppressed)
         budget_info = self.budget_manager.get_budget_info()
-        self.console.print(f"Querying codebase at: [cyan]{abs_codebase_path}[/cyan]")
-        self.console.print(f"Question: [bold yellow]{question}[/bold yellow]")
-        self.console.print(
-            f"Context mode: [green]{budget_info['mode']}[/green] "
-            f"(~{budget_info['context_budget']:,} tokens, "
-            f"{budget_info['budget_percentage']:.0f}% of {budget_info['max_context']:,} token limit)"
-        )
+        if not suppress_status:
+            self.console.print(f"Querying codebase at: [cyan]{abs_codebase_path}[/cyan]")
+            self.console.print(f"Question: [bold yellow]{question}[/bold yellow]")
+            self.console.print(
+                f"Context mode: [green]{budget_info['mode']}[/green] "
+                f"(~{budget_info['context_budget']:,} tokens, "
+                f"{budget_info['budget_percentage']:.0f}% of {budget_info['max_context']:,} token limit)"
+            )
 
         context_result: Dict[str, Any] = {}
-        with self.console.status("[cyan]Searching codebase context...", spinner="dots"):
+        
+        # Use status display only if not suppressed
+        if not suppress_status:
+            status_manager = self.console.status("[cyan]Searching codebase context...", spinner="dots")
+        else:
+            # Create a dummy context manager that does nothing
+            status_manager = nullcontext()
+            
+        with status_manager:
             try:
                 context_result = self.context_aware_retriever.retrieve_with_budget(
                     query=question, context_type="query"
@@ -214,27 +238,36 @@ class QueryService:
                 tokens_used = context_result.get("total_tokens", 0)
                 strategy = context_result.get("retrieval_strategy", "unknown")
                 
-                self.console.print(
-                    f"[debug]Retrieved context using {strategy} strategy. "
-                    f"Used {tokens_used:,} tokens ({context_result.get('budget_used', 0):.1f}% of budget).[/debug]",
-                    style="dim",
-                )
+                if not suppress_status:
+                    self.console.print(
+                        f"[debug]Retrieved context using {strategy} strategy. "
+                        f"Used {tokens_used:,} tokens ({context_result.get('budget_used', 0):.1f}% of budget).[/debug]",
+                        style="dim",
+                    )
             except Exception as e:
-                self.console.print(f"[bold red]Error during retrieval: {e}[/]")
+                if not suppress_status:
+                    self.console.print(f"[bold red]Error during retrieval: {e}[/]")
                 return f"Error during retrieval: {e}", []
 
         # Prepare context for LLM
         context_parts = context_result.get("context_parts", {})
         if not context_parts:
-            self.console.print(
-                "[yellow]No relevant context found in the codebase for your query. Attempting to answer without specific context...[/yellow]"
-            )
+            if not suppress_status:
+                self.console.print(
+                    "[yellow]No relevant context found in the codebase for your query. Attempting to answer without specific context...[/yellow]"
+                )
             formatted_context = []
         else:
             # Convert context parts to format expected by LLM
             formatted_context = self._format_context_for_llm(context_parts)
 
-        with self.console.status("[cyan]Generating answer with LLM...", spinner="dots"):
+        # Use status display only if not suppressed
+        if not suppress_status:
+            llm_status_manager = self.console.status("[cyan]Generating answer with LLM...", spinner="dots")
+        else:
+            llm_status_manager = nullcontext()
+            
+        with llm_status_manager:
             try:
                 answer_text = self.llm_client.answer_question(
                     question=question, context=formatted_context
@@ -244,16 +277,18 @@ class QueryService:
                 answer_tokens = self.token_counter.count_tokens(str(answer_text))
                 total_tokens = context_result.get("total_tokens", 0) + answer_tokens
                 
-                self.console.print(
-                    f"[debug]Response generated. Answer: {answer_tokens:,} tokens, "
-                    f"Total: {total_tokens:,} tokens.[/debug]",
-                    style="dim",
-                )
+                if not suppress_status:
+                    self.console.print(
+                        f"[debug]Response generated. Answer: {answer_tokens:,} tokens, "
+                        f"Total: {total_tokens:,} tokens.[/debug]",
+                        style="dim",
+                    )
                 
             except Exception as e:
-                self.console.print(
-                    f"[bold red]Error during LLM answer generation: {e}[/]"
-                )
+                if not suppress_status:
+                    self.console.print(
+                        f"[bold red]Error during LLM answer generation: {e}[/]"
+                    )
                 return f"Error during LLM answer generation: {e}", formatted_context
 
         return answer_text, formatted_context

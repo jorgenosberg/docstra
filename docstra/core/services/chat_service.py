@@ -112,6 +112,9 @@ class ChatService:
         self.current_session_id: Optional[str] = None
         self.current_chat_history: List[Dict[str, str]] = []
         self.current_codebase_path_context: Optional[Path] = None
+        
+        # Track last interaction details for stats
+        self.last_interaction: Optional[Dict[str, Any]] = None
 
     def _get_db_path(self) -> Path:
         persist_dir_name = self.user_config.storage.persist_directory
@@ -349,6 +352,7 @@ class ChatService:
             question=user_query,
             codebase_path_str=str(self.current_codebase_path_context),
             n_results=3,
+            suppress_status=True  # Suppress status displays to avoid Rich Live display conflicts
         )
 
         # Create enhanced response using both conversation context and RAG
@@ -356,9 +360,28 @@ class ChatService:
             user_query, context_answer, trimmed_history, sources
         )
 
+        # Calculate token usage for this interaction
+        conversation_tokens = count_tokens_in_messages(trimmed_history, self.token_counter)
+        context_tokens = self.token_counter.count_tokens(context_answer)
+        response_tokens = self.token_counter.count_tokens(enhanced_response)
+        total_tokens = conversation_tokens + context_tokens + response_tokens
+        
+        # Store interaction details for stats
+        self.last_interaction = {
+            "user_query": user_query,
+            "conversation_tokens": conversation_tokens,
+            "context_tokens": context_tokens,
+            "response_tokens": response_tokens,
+            "total_tokens": total_tokens,
+            "context_mode": self.user_config.model.context_mode,
+            "model_name": self.user_config.model.model_name,
+            "provider": self.user_config.model.provider.value,
+            "sources_count": len(sources)
+        }
+        
         response_metadata = {
             "sources": sources,
-            "conversation_tokens": count_tokens_in_messages(trimmed_history, self.token_counter),
+            "conversation_tokens": conversation_tokens,
             "total_messages": len(trimmed_history)
         }
         
@@ -367,6 +390,24 @@ class ChatService:
         )
 
         return enhanced_response
+
+    def get_last_usage_summary(self) -> str:
+        """Get a simple one-line summary of the last interaction's token usage."""
+        if not self.last_interaction:
+            return "no usage data available"
+        
+        interaction = self.last_interaction
+        total_tokens = interaction["total_tokens"]
+        context_tokens = interaction["context_tokens"]
+        
+        # Get context window for percentage calculation
+        context_window = self.user_config.model.context_window
+        if not context_window:
+            context_window = self.token_counter.estimate_max_context()
+        
+        usage_percent = (total_tokens / context_window) * 100
+        
+        return f"{total_tokens:,} tokens ({usage_percent:.1f}% of {context_window:,}) | {context_tokens:,} context | {interaction['context_mode']} mode"
 
     def _trim_conversation_to_budget(self, budget: int) -> List[Dict[str, str]]:
         """Trim conversation history to fit within budget while preserving recent context."""

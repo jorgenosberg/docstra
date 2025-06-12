@@ -113,7 +113,11 @@ class ContextAwareRetriever:
         architectural_patterns = [
             r'\b(architecture|design|structure|overview|how.*work|organization)\b',
             r'\b(system|module|component|relationship|dependency)\b',
-            r'\b(flow|process|pattern|framework)\b'
+            r'\b(flow|process|pattern|framework)\b',
+            r'\b(where.*defined|where.*located|where.*find|location.*of)\b',
+            r'\b(which.*file|what.*file|file.*contain)\b',
+            r'\b(what.*defined|what.*functions|what.*classes|what.*in.*\.py)\b',
+            r'\b(cli\.py|main\.py|app\.py|server\.py)\b'
         ]
         
         implementation_patterns = [
@@ -211,36 +215,58 @@ class ContextAwareRetriever:
         context_parts = {}
         remaining_budget = budget
         
-        # 1. Repository overview (high priority for architectural queries)
+        # Determine if this is a high-budget context (detailed mode)
+        is_detailed_mode = budget > 50000  # More than 50k tokens available
+        
+        # 1. Repository overview (higher priority and detail for large budgets)
         if self.repo_map and remaining_budget > 500:
-            repo_overview = self._get_compact_repo_overview()
+            if is_detailed_mode:
+                repo_overview = self._get_detailed_repo_overview()
+            else:
+                repo_overview = self._get_compact_repo_overview()
+                
             if repo_overview:
                 overview_tokens = self.budget_manager.token_counter.count_tokens(repo_overview)
-                if overview_tokens <= remaining_budget * 0.3:  # Use up to 30% for overview
+                # Use more budget for overview in detailed mode
+                max_overview_budget = remaining_budget * (0.2 if is_detailed_mode else 0.3)
+                if overview_tokens <= max_overview_budget:
                     context_parts["repo_overview"] = repo_overview
                     remaining_budget -= overview_tokens
         
-        # 2. Relevant modules (based on query symbols)
+        # 2. Relevant modules (scale based on budget)
         if remaining_budget > 300:
-            modules_context = self._get_relevant_modules_context(analysis, remaining_budget * 0.3)
+            module_budget = budget * (0.4 if is_detailed_mode else 0.3)  # Use original budget
+            modules_context = self._get_relevant_modules_context(analysis, module_budget)
             if modules_context:
                 context_parts["relevant_modules"] = modules_context
                 module_tokens = self.budget_manager.token_counter.count_tokens(modules_context)
                 remaining_budget -= module_tokens
         
-        # 3. Dependencies and relationships
+        # 3. Dependencies and relationships (more detail in detailed mode)
         if remaining_budget > 200:
-            deps_context = self._get_dependency_context(analysis, remaining_budget * 0.4)
+            deps_budget = budget * (0.2 if is_detailed_mode else 0.3)  # Use original budget
+            deps_context = self._get_dependency_context(analysis, deps_budget)
             if deps_context:
                 context_parts["dependencies"] = deps_context
                 deps_tokens = self.budget_manager.token_counter.count_tokens(deps_context)
                 remaining_budget -= deps_tokens
         
-        # 4. Targeted code samples (if budget allows)
+        # 4. Targeted code samples (much more in detailed mode)
         if remaining_budget > 200:
-            code_samples = self._get_targeted_code_samples(query, analysis, remaining_budget)
+            # Use much more budget for code samples in detailed mode
+            samples_budget = min(remaining_budget, budget * (0.3 if is_detailed_mode else 0.2))
+            code_samples = self._get_targeted_code_samples(query, analysis, samples_budget)
             if code_samples:
                 context_parts["code_samples"] = code_samples
+                samples_tokens = self.budget_manager.token_counter.count_tokens(code_samples)
+                remaining_budget -= samples_tokens
+                
+        # 5. Additional context for detailed mode
+        if is_detailed_mode and remaining_budget > 1000:
+            # Add file contents for key files like cli.py
+            file_content = self._get_key_file_contents(analysis, remaining_budget)
+            if file_content:
+                context_parts["file_contents"] = file_content
         
         return {
             "context_parts": context_parts,
@@ -418,6 +444,26 @@ class ContextAwareRetriever:
                     if module_path not in relevant_modules:
                         relevant_modules.append(module_path)
         
+        # If no symbols found, search by file names and concepts
+        if not relevant_modules and self.code_index:
+            # Search for files with relevant names for architectural queries
+            concept_keywords = ["cli", "main", "command", "app", "interface", "entry"]
+            
+            for file_path, metadata in self.code_index.file_index.items():
+                file_name = file_path.lower()
+                # Check if filename contains relevant concepts
+                for keyword in concept_keywords:
+                    if keyword in file_name:
+                        relevant_modules.append(file_path)
+                        break
+                # Check if the file has CLI-related functions
+                functions = metadata.get('functions', [])
+                for func in functions:
+                    if any(keyword in func.lower() for keyword in ['command', 'cli', 'main', 'app']):
+                        if file_path not in relevant_modules:
+                            relevant_modules.append(file_path)
+                        break
+        
         if not relevant_modules:
             return None
         
@@ -427,10 +473,38 @@ class ContextAwareRetriever:
             if self.code_index:
                 metadata = self.code_index.get_file_metadata(module_path)
                 if metadata:
-                    module_parts.append(
-                        f"- {module_path}: {len(metadata.get('functions', []))} functions, "
-                        f"{len(metadata.get('classes', []))} classes"
-                    )
+                    functions = metadata.get('functions', [])
+                    classes = metadata.get('classes', [])
+                    
+                    # Include function names for CLI files since they're likely important
+                    if 'cli.py' in module_path.lower() and len(functions) > 0:
+                        # For detailed mode, show many more functions
+                        is_detailed = budget > 20000  # Check if we have a large budget
+                        max_functions = 20 if is_detailed else 8
+                        
+                        func_list = ', '.join(functions[:max_functions])
+                        if len(functions) > max_functions:
+                            func_list += f", and {len(functions) - max_functions} more"
+                        
+                        # In detailed mode, add more information
+                        if is_detailed:
+                            imports = metadata.get('imports', [])
+                            import_summary = f", imports from {len(imports)} modules" if imports else ""
+                            
+                            module_parts.append(
+                                f"- {module_path}: {len(functions)} functions ({func_list}){import_summary}, "
+                                f"{len(classes)} classes"
+                            )
+                        else:
+                            module_parts.append(
+                                f"- {module_path}: {len(functions)} functions ({func_list}), "
+                                f"{len(classes)} classes"
+                            )
+                    else:
+                        module_parts.append(
+                            f"- {module_path}: {len(functions)} functions, "
+                            f"{len(classes)} classes"
+                        )
         
         if module_parts:
             return "Relevant modules:\n" + "\n".join(module_parts)
@@ -485,9 +559,14 @@ class ContextAwareRetriever:
             
             for example in examples:
                 content = example.get("content", "")
-                # Truncate long examples
-                if len(content) > 500:
-                    content = content[:500] + "\n..."
+                
+                # For detailed mode, allow much longer examples
+                is_detailed = budget > 20000
+                max_length = 2000 if is_detailed else 500
+                
+                # Truncate long examples based on mode
+                if len(content) > max_length:
+                    content = content[:max_length] + "\n..."
                 
                 tokens_needed = self.budget_manager.token_counter.count_tokens(content)
                 if used_tokens + tokens_needed > budget:
@@ -700,3 +779,88 @@ class ContextAwareRetriever:
         header = " | ".join(parts) if parts else "Code:"
         
         return f"{header}\n```\n{content}\n```"
+    
+    def _get_detailed_repo_overview(self) -> Optional[str]:
+        """Get a detailed repository overview for high-budget contexts."""
+        if not self.repo_map:
+            return None
+        
+        try:
+            overview = self.repo_map.get_module_overview()
+            stats = overview.get("statistics", {})
+            
+            overview_parts = [
+                f"Repository Overview:",
+                f"- Total files: {stats.get('total_files', 0)}",
+                f"- Languages: {', '.join(stats.get('languages', {}).keys())}",
+                f"- Main modules: {', '.join(stats.get('module_sizes', {}).keys())}",
+                "",
+                "Key directories and their purposes:"
+            ]
+            
+            # Add directory structure
+            if self.code_index:
+                directories = {}
+                for file_path in self.code_index.file_index.keys():
+                    dir_name = "/".join(file_path.split("/")[:-1])
+                    if "core" in dir_name:
+                        directories[dir_name] = directories.get(dir_name, 0) + 1
+                
+                for dir_name, file_count in sorted(directories.items())[:10]:
+                    if file_count > 1:  # Only show directories with multiple files
+                        overview_parts.append(f"- {dir_name}: {file_count} files")
+            
+            return "\n".join(overview_parts)
+        except Exception:
+            return None
+    
+    def _get_key_file_contents(self, analysis: QueryAnalysis, budget: int) -> Optional[str]:
+        """Get actual file contents for key files in detailed mode."""
+        if not self.code_index:
+            return None
+        
+        # Find key files mentioned in the query or CLI-related files
+        key_files = []
+        
+        # Look for CLI-related files
+        for file_path in self.code_index.file_index.keys():
+            if any(keyword in file_path.lower() for keyword in ['cli.py', 'main.py', 'app.py']):
+                key_files.append(file_path)
+        
+        if not key_files:
+            return None
+        
+        content_parts = []
+        used_budget = 0
+        
+        for file_path in key_files[:2]:  # Limit to 2 files to avoid budget overflow
+            try:
+                # Get file metadata to show structure
+                metadata = self.code_index.get_file_metadata(file_path)
+                if metadata:
+                    functions = metadata.get('functions', [])
+                    classes = metadata.get('classes', [])
+                    
+                    file_summary = [
+                        f"File: {file_path}",
+                        f"Functions ({len(functions)}): {', '.join(functions[:15])}{'...' if len(functions) > 15 else ''}",
+                        f"Classes ({len(classes)}): {', '.join(classes[:10])}{'...' if len(classes) > 10 else ''}",
+                        ""
+                    ]
+                    
+                    file_content = "\n".join(file_summary)
+                    content_tokens = self.budget_manager.token_counter.count_tokens(file_content)
+                    
+                    if used_budget + content_tokens <= budget:
+                        content_parts.append(file_content)
+                        used_budget += content_tokens
+                    else:
+                        break
+                        
+            except Exception:
+                continue
+        
+        if content_parts:
+            return "Key file details:\n\n" + "\n".join(content_parts)
+        
+        return None

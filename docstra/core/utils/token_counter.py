@@ -106,9 +106,33 @@ class GenericTokenCounter(TokenCounter):
         self.estimated_context = estimated_context
     
     def count_tokens(self, text: str) -> int:
-        """Estimate tokens based on character count (rough approximation)."""
-        # Very rough approximation: ~4 characters per token
-        return len(text) // 4
+        """Estimate tokens based on improved character count approximation."""
+        # Improved approximation based on content type and model characteristics
+        if not text:
+            return 0
+        
+        # Count different types of content with different ratios
+        import re
+        
+        # Code patterns (shorter tokens due to symbols/syntax)
+        code_chars = len(re.findall(r'[{}()\[\];,.:=+\-*/]', text))
+        # Whitespace and newlines
+        whitespace_chars = len(re.findall(r'\s', text))
+        # Regular text
+        text_chars = len(text) - code_chars - whitespace_chars
+        
+        # Different character-to-token ratios based on content type
+        # Code/symbols: ~2.5 chars per token (lots of short tokens)
+        # Regular text: ~4.2 chars per token 
+        # Whitespace: ~1 char per token (each space/newline is often a token)
+        
+        estimated_tokens = (
+            (code_chars / 2.5) + 
+            (text_chars / 4.2) + 
+            (whitespace_chars / 1.5)  # Whitespace is often grouped
+        )
+        
+        return max(1, int(estimated_tokens))
     
     def estimate_max_context(self) -> int:
         """Get estimated maximum context window."""

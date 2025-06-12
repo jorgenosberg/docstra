@@ -1649,16 +1649,36 @@ def query(
         if not symbols_only:
             console.print(f"[{Colors.DIM}]• docstra query \"{question}\" --symbols-only[/]")
 
-    # Display token usage statistics if tracking is enabled
+    # Display enhanced token usage statistics
     llm_tracker = get_llm_tracker()
     if llm_tracker and llm_tracker.session_stats:
-        console.print(f"\n[{Colors.DIM}]LLM Usage:[/]")
+        console.print(f"\n[{Colors.DIM}]Query Summary:[/]")
+        
         # Get the last usage from session stats
         usage = llm_tracker.session_stats[-1]
-        console.print(f"[{Colors.DIM}]Input tokens: {usage.get('input_tokens', 'N/A')}[/]")
-        console.print(f"[{Colors.DIM}]Output tokens: {usage.get('output_tokens', 'N/A')}[/]")
-        if "cost_usd" in usage:
-            console.print(f"[{Colors.DIM}]Approximate cost: ${usage.get('cost_usd', 0):.5f}[/]")
+        
+        # Get model and context window info
+        model_name = user_config.model.model_name
+        provider = user_config.model.provider.value
+        context_window = user_config.model.context_window
+        
+        # If no context window configured, get estimated from token counter
+        if not context_window:
+            from docstra.core.utils.token_counter import get_token_counter
+            token_counter = get_token_counter(model_name, provider)
+            context_window = token_counter.estimate_max_context()
+        
+        input_tokens = usage.get('input_tokens', 0)
+        output_tokens = usage.get('output_tokens', 0)
+        total_used = input_tokens + output_tokens
+        remaining_context = context_window - total_used
+        
+        console.print(f"[{Colors.DIM}]Model: {model_name} ({provider}) | Context: {context_window:,} tokens[/]")
+        console.print(f"[{Colors.DIM}]Input: {input_tokens:,} tokens | Output: {output_tokens:,} tokens | Used: {total_used:,} tokens[/]")
+        console.print(f"[{Colors.DIM}]Remaining context: {remaining_context:,} tokens ({(remaining_context/context_window)*100:.1f}%)[/]")
+        
+        if "cost_usd" in usage and usage.get('cost_usd', 0) > 0:
+            console.print(f"[{Colors.DIM}]Estimated cost: ${usage.get('cost_usd', 0):.5f}[/]")
 
 
 # Add chat command - new functionality per refactoring plan
@@ -1767,27 +1787,50 @@ def chat(
 
             # Check for stats command
             if user_input.lower() == "stats":
+                console.print(f"\n[{Colors.BOLD}]Chat Statistics:[/]")
+                
+                # Show detailed last interaction stats
+                if chat_service.last_interaction:
+                    interaction = chat_service.last_interaction
+                    console.print(f"\n[{Colors.BOLD}]Last Question:[/] {interaction['user_query'][:60]}{'...' if len(interaction['user_query']) > 60 else ''}")
+                    console.print(f"[{Colors.BOLD}]Model:[/] {interaction['model_name']} ({interaction['provider']})")
+                    
+                    # Get context window info
+                    context_window = user_config.model.context_window
+                    if not context_window:
+                        from docstra.core.utils.token_counter import get_token_counter
+                        token_counter = get_token_counter(interaction['model_name'], interaction['provider'])
+                        context_window = token_counter.estimate_max_context()
+                    
+                    total_tokens = interaction['total_tokens']
+                    usage_percent = (total_tokens / context_window) * 100
+                    remaining = context_window - total_tokens
+                    
+                    console.print(f"[{Colors.BOLD}]Context Window:[/] {context_window:,} tokens")
+                    console.print(f"[{Colors.BOLD}]Token Breakdown:[/]")
+                    console.print(f"  • Conversation history: {interaction['conversation_tokens']:,} tokens")
+                    console.print(f"  • Retrieved context: {interaction['context_tokens']:,} tokens")
+                    console.print(f"  • Response generated: {interaction['response_tokens']:,} tokens")
+                    console.print(f"  • Total used: {total_tokens:,} tokens ({usage_percent:.1f}%)")
+                    console.print(f"  • Remaining: {remaining:,} tokens ({(remaining/context_window)*100:.1f}%)")
+                    console.print(f"[{Colors.BOLD}]Context Mode:[/] {interaction['context_mode']} | Sources: {interaction['sources_count']}")
+                else:
+                    console.print("No interaction data available yet.")
+                
+                # Show session summary
                 llm_tracker = get_llm_tracker()
                 if llm_tracker:
                     session_summary = llm_tracker.get_session_summary()
-                    if "message" in session_summary:
-                        console.print(f"\n[{Colors.WARNING}]{session_summary['message']}[/]")
-                    else:
-                        console.print(f"\n[{Colors.BOLD}]Session Statistics:[/]")
+                    if "session_summary" in session_summary:
+                        console.print(f"\n[{Colors.BOLD}]Session Summary:[/]")
                         session_stats = session_summary.get("session_summary", {})
-                        console.print(
-                            f"Total requests: {session_stats.get('total_requests', 0)}"
-                        )
-                        console.print(
-                            f"Total input tokens: {session_stats.get('total_input_tokens', 0)}"
-                        )
-                        console.print(
-                            f"Total output tokens: {session_stats.get('total_output_tokens', 0)}"
-                        )
-                        console.print(f"Total cost: ${session_stats.get('total_cost', 0):.5f}")
-                        console.print(f"Total duration: {session_stats.get('total_duration_ms', 0):.0f} ms")
-                else:
-                    console.print(f"\n[{Colors.WARNING}]LLM tracking not available.[/{Colors.WARNING}]")
+                        console.print(f"Total requests: {session_stats.get('total_requests', 0)}")
+                        console.print(f"Total input tokens: {session_stats.get('total_input_tokens', 0):,}")
+                        console.print(f"Total output tokens: {session_stats.get('total_output_tokens', 0):,}")
+                        if session_stats.get('total_cost', 0) > 0:
+                            console.print(f"Total cost: ${session_stats.get('total_cost', 0):.5f}")
+                        console.print(f"Average duration: {session_stats.get('total_duration_ms', 0)/max(session_stats.get('total_requests', 1), 1):.0f} ms/request")
+                
                 continue
 
             # Get response from the chat service
@@ -1797,11 +1840,8 @@ def chat(
             # Display the response
             console.print(f"\n[Assistant]: {response}")
             
-            # Display token usage information 
-            budget_info = chat_service.budget_manager.get_budget_info()
-            console.print(f"\n[{Colors.DIM}]Context: {budget_info['mode']} mode, "
-                         f"{budget_info['context_budget']:,} token budget "
-                         f"({budget_info['budget_percentage']:.0f}% of {budget_info['max_context']:,})[/]")
+            # Simple one-line context summary
+            console.print(f"[{Colors.DIM}]Used {chat_service.get_last_usage_summary()}[/]")
 
         except KeyboardInterrupt:
             console.print(f"\n[{Colors.BOLD}]Chat session interrupted.[/]")
