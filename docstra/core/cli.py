@@ -1757,9 +1757,10 @@ def chat(
 
     # Interactive chat loop
     console.print(
-        f"[{Colors.BOLD}]Chat session started. Type 'exit' or 'quit' to end the session.[/]"
+        f"[{Colors.BOLD}]Chat session started. Type '/exit' or '/quit' to end the session.[/]"
     )
-    console.print(f"[{Colors.BOLD}]Type 'help' for available commands.[/]")
+    console.print(f"[{Colors.BOLD}]Type '/help' for available commands.[/]")
+    console.print(f"[{Colors.DIM}]💡 Commands use '/' prefix (e.g., /sessions, /stats). Regular questions don't need any prefix.[/]")
 
     while True:
         try:
@@ -1767,35 +1768,53 @@ def chat(
             user_input = input("\n[You]: ")
 
             # Check for exit/quit command
-            if user_input.lower() in ["exit", "quit"]:
+            if user_input.lower() in ["/exit", "/quit"]:
                 console.print(f"[{Colors.BOLD}]Ending chat session.[/]")
                 break
 
+            # Check for unknown commands first (before processing known commands)
+            if user_input.startswith("/") and len(user_input) > 1:
+                # Extract the command part (before any space)
+                command_part = user_input.split()[0].lower()
+                
+                # List of valid commands
+                valid_commands = {
+                    "/help", "/clear", "/stats", "/sessions", "/switch", "/new", 
+                    "/delete", "/info", "/history", "/export"
+                }
+                
+                # Check if it's an unknown command
+                if command_part not in valid_commands and not any(command_part.startswith(cmd) for cmd in ["/switch", "/delete"]):
+                    console.print(f"\n[{Colors.ERROR_BOLD}]❌ Unknown command:[/] {command_part}")
+                    console.print(f"[{Colors.DIM}]Type [{Colors.HIGHLIGHT}]/help[/] to see all available commands[/]")
+                    console.print(f"[{Colors.DIM}]💡 Commands use '/' prefix. Regular questions don't need any prefix.[/]")
+                    continue
+
             # Check for help command
-            if user_input.lower() == "help":
+            if user_input.lower() in ["help", "/help"]:
                 console.print(f"\n[{Colors.BOLD}]Available commands:[/]")
                 console.print(f"  [{Colors.HIGHLIGHT}]exit/quit[/] - End the chat session")
-                console.print(f"  [{Colors.HIGHLIGHT}]help[/] - Show this help message")
-                console.print(f"  [{Colors.HIGHLIGHT}]clear[/] - Clear the screen")
-                console.print(f"  [{Colors.HIGHLIGHT}]stats[/] - Show token usage statistics")
+                console.print(f"  [{Colors.HIGHLIGHT}]/help[/] - Show this help message")
+                console.print(f"  [{Colors.HIGHLIGHT}]/clear[/] - Clear the screen")
+                console.print(f"  [{Colors.HIGHLIGHT}]/stats[/] - Show token usage statistics")
                 console.print(f"\n[{Colors.BOLD}]Session Management:[/]")
-                console.print(f"  [{Colors.HIGHLIGHT}]sessions[/] - List all chat sessions")
-                console.print(f"  [{Colors.HIGHLIGHT}]switch <session_id>[/] - Switch to another session")
-                console.print(f"  [{Colors.HIGHLIGHT}]new[/] - Start a new chat session")
-                console.print(f"  [{Colors.HIGHLIGHT}]delete <session_id>[/] - Delete a session")
-                console.print(f"  [{Colors.HIGHLIGHT}]info[/] - Show current session details")
-                console.print(f"  [{Colors.HIGHLIGHT}]history[/] - Show recent conversation history")
-                console.print(f"  [{Colors.HIGHLIGHT}]export[/] - Export current conversation to file")
-                console.print(f"\n[{Colors.DIM}]💡 Tip: You can use partial session IDs (e.g., 'switch abc123')[/]")
+                console.print(f"  [{Colors.HIGHLIGHT}]/sessions[/] - List all chat sessions")
+                console.print(f"  [{Colors.HIGHLIGHT}]/switch <session_id>[/] - Switch to another session")
+                console.print(f"  [{Colors.HIGHLIGHT}]/new[/] - Start a new chat session")
+                console.print(f"  [{Colors.HIGHLIGHT}]/delete <session_id>[/] - Delete a session")
+                console.print(f"  [{Colors.HIGHLIGHT}]/info[/] - Show current session details")
+                console.print(f"  [{Colors.HIGHLIGHT}]/history[/] - Show recent conversation history")
+                console.print(f"  [{Colors.HIGHLIGHT}]/export[/] - Export current conversation to file")
+                console.print(f"\n[{Colors.DIM}]💡 Tip: You can use partial session IDs (e.g., '/switch abc123')[/]")
                 continue
 
             # Check for clear command
-            if user_input.lower() == "clear":
+            if user_input.lower() == "/clear":
                 os.system("cls" if os.name == "nt" else "clear")
                 continue
 
             # Check for stats command
-            if user_input.lower() == "stats":
+            if user_input.lower() == "/stats":
                 console.print(f"\n[{Colors.BOLD}]Chat Statistics:[/]")
                 
                 # Show detailed last interaction stats
@@ -1843,7 +1862,7 @@ def chat(
                 continue
 
             # Session management commands
-            if user_input.lower() == "sessions":
+            if user_input.lower() == "/sessions":
                 sessions = chat_service.list_sessions()
                 if not sessions:
                     console.print(f"[{Colors.WARNING}]No chat sessions found.[/]")
@@ -1855,13 +1874,13 @@ def chat(
                             f"{session_marker} [{Colors.HIGHLIGHT}]{session['id'][:8]}[/] - {session['name']} "
                             f"[{Colors.DIM}](last used: {session['last_accessed_at'][:16]})[/]"
                         )
-                    console.print(f"\n[{Colors.DIM}]Use 'switch <session_id>' to change sessions[/]")
+                    console.print(f"\n[{Colors.DIM}]Use '/switch <session_id>' to change sessions[/]")
                 continue
 
-            if user_input.lower().startswith("switch "):
-                session_id = user_input[7:].strip()
+            if user_input.lower().startswith("/switch "):
+                session_id = user_input[8:].strip()
                 if not session_id:
-                    console.print(f"[{Colors.ERROR}]Please provide a session ID. Use 'sessions' to see available sessions.[/]")
+                    console.print(f"[{Colors.ERROR}]Please provide a session ID. Use '/sessions' to see available sessions.[/]")
                     continue
                 
                 # Try to find session by partial ID match
@@ -1873,7 +1892,7 @@ def chat(
                         break
                 
                 if not matching_session:
-                    console.print(f"[{Colors.ERROR}]Session '{session_id}' not found. Use 'sessions' to see available sessions.[/]")
+                    console.print(f"[{Colors.ERROR}]Session '{session_id}' not found. Use '/sessions' to see available sessions.[/]")
                     continue
                 
                 if chat_service.load_session(matching_session['id'], codebase_path):
@@ -1882,7 +1901,7 @@ def chat(
                     console.print(f"[{Colors.ERROR}]Failed to switch to session '{session_id}'[/]")
                 continue
 
-            if user_input.lower() == "new":
+            if user_input.lower() == "/new":
                 old_session_name = None
                 if chat_service.current_session_id:
                     sessions = chat_service.list_sessions()
@@ -1897,10 +1916,10 @@ def chat(
                     console.print(f"[{Colors.DIM}]Previous session '{old_session_name}' is still available[/]")
                 continue
 
-            if user_input.lower().startswith("delete "):
-                session_id = user_input[7:].strip()
+            if user_input.lower().startswith("/delete "):
+                session_id = user_input[8:].strip()
                 if not session_id:
-                    console.print(f"[{Colors.ERROR}]Please provide a session ID. Use 'sessions' to see available sessions.[/]")
+                    console.print(f"[{Colors.ERROR}]Please provide a session ID. Use '/sessions' to see available sessions.[/]")
                     continue
                 
                 # Prevent deleting current session
@@ -1917,7 +1936,7 @@ def chat(
                         break
                 
                 if not matching_session:
-                    console.print(f"[{Colors.ERROR}]Session '{session_id}' not found. Use 'sessions' to see available sessions.[/]")
+                    console.print(f"[{Colors.ERROR}]Session '{session_id}' not found. Use '/sessions' to see available sessions.[/]")
                     continue
                 
                 if chat_service.delete_session(matching_session['id']):
@@ -1926,7 +1945,7 @@ def chat(
                     console.print(f"[{Colors.ERROR}]Failed to delete session '{session_id}'[/]")
                 continue
 
-            if user_input.lower() == "info":
+            if user_input.lower() == "/info":
                 if not chat_service.current_session_id:
                     console.print(f"[{Colors.WARNING}]No active session[/]")
                     continue
@@ -1950,7 +1969,7 @@ def chat(
                     console.print(f"[{Colors.WARNING}]Session information not available[/]")
                 continue
 
-            if user_input.lower() == "history":
+            if user_input.lower() == "/history":
                 if not chat_service.current_chat_history:
                     console.print(f"[{Colors.WARNING}]No conversation history in current session[/]")
                     continue
@@ -1973,7 +1992,7 @@ def chat(
                     console.print(f"[{Colors.DIM}]... and {len(chat_service.current_chat_history) - 10} older messages[/]")
                 continue
 
-            if user_input.lower() == "export":
+            if user_input.lower() == "/export":
                 if not chat_service.current_chat_history:
                     console.print(f"[{Colors.WARNING}]No conversation history to export[/]")
                     continue
