@@ -19,6 +19,7 @@ from docstra.core.llm.local import LocalModelClient
 from docstra.core.llm.ollama import OllamaClient
 from docstra.core.llm.openai import OpenAIClient
 from docstra.core.services.query_service import QueryService
+from docstra.core.utils.token_counter import get_token_counter, ContextBudgetManager, count_tokens_in_messages
 
 
 # Database schema constants
@@ -94,6 +95,16 @@ class ChatService:
 
         # QueryService is used for RAG within the chat
         self.query_service = QueryService(user_config, self.console, self.callbacks)
+
+        # Token management for conversation
+        self.token_counter = get_token_counter(
+            self.user_config.model.model_name_chat or self.user_config.model.model_name,
+            self.user_config.model.provider
+        )
+        self.budget_manager = ContextBudgetManager(
+            self.token_counter,
+            self.user_config.model.context_mode
+        )
 
         self.db_path = self._get_db_path()
         self._ensure_db_tables()
@@ -314,27 +325,96 @@ class ChatService:
 
         self._add_message_to_history("user", user_query)
 
-        # Use QueryService to get RAG context
-        # self.console.print("[dim]Fetching context from codebase...[/dim]")
+        # Manage conversation context within budget
+        budget_info = self.budget_manager.get_budget_info()
+        
+        # Calculate tokens used by conversation history
+        history_tokens = count_tokens_in_messages(self.current_chat_history, self.token_counter)
+        
+        # Reserve budget for RAG context and response
+        rag_budget = int(budget_info["context_budget"] * 0.6)  # 60% for RAG
+        conversation_budget = budget_info["context_budget"] - rag_budget
+        
+        # Trim conversation history if needed
+        trimmed_history = self._trim_conversation_to_budget(conversation_budget)
+        
+        self.console.print(
+            f"[dim]Chat context: {len(trimmed_history)} messages "
+            f"(~{count_tokens_in_messages(trimmed_history, self.token_counter):,} tokens), "
+            f"Mode: {budget_info['mode']}[/dim]"
+        )
+
+        # Use QueryService to get RAG context with reduced budget
         context_answer, sources = self.query_service.answer_question(
             question=user_query,
             codebase_path_str=str(self.current_codebase_path_context),
             n_results=3,
         )
 
-        # For now, we directly use the RAG-enhanced answer from QueryService.
-        # A more advanced chat would feed the `sources` and `user_query` along with `chat_history`
-        # to a chat-specific LLM call.
-        # The `context_answer` from QueryService is already an LLM's attempt to answer based on context.
-
-        assistant_response = context_answer
-
-        response_metadata = {"sources": sources} if sources else {}
-        self._add_message_to_history(
-            "assistant", assistant_response, metadata=response_metadata
+        # Create enhanced response using both conversation context and RAG
+        enhanced_response = self._create_enhanced_response(
+            user_query, context_answer, trimmed_history, sources
         )
 
-        return assistant_response
+        response_metadata = {
+            "sources": sources,
+            "conversation_tokens": count_tokens_in_messages(trimmed_history, self.token_counter),
+            "total_messages": len(trimmed_history)
+        }
+        
+        self._add_message_to_history(
+            "assistant", enhanced_response, metadata=response_metadata
+        )
+
+        return enhanced_response
+
+    def _trim_conversation_to_budget(self, budget: int) -> List[Dict[str, str]]:
+        """Trim conversation history to fit within budget while preserving recent context."""
+        
+        if not self.current_chat_history:
+            return []
+        
+        # Always keep the most recent user message
+        recent_messages = []
+        current_tokens = 0
+        
+        # Go backwards through history to keep most recent messages
+        for message in reversed(self.current_chat_history):
+            message_tokens = self.token_counter.count_tokens(
+                f"{message.get('role', '')}: {message.get('content', '')}"
+            )
+            
+            if current_tokens + message_tokens > budget and recent_messages:
+                # Budget exceeded and we have at least one message
+                break
+            
+            recent_messages.insert(0, message)  # Insert at beginning to maintain order
+            current_tokens += message_tokens
+        
+        return recent_messages
+
+    def _create_enhanced_response(
+        self,
+        user_query: str,
+        rag_answer: str,
+        conversation_history: List[Dict[str, str]],
+        sources: List[Dict[str, Any]]
+    ) -> str:
+        """Create an enhanced response using conversation context and RAG results."""
+        
+        # For now, we'll use the RAG answer directly but could enhance it
+        # with conversation-aware processing in the future
+        
+        # Check if this is a follow-up question
+        if len(conversation_history) > 1:
+            # Look for continuation words that suggest follow-up
+            follow_up_indicators = ["also", "additionally", "furthermore", "what about", "how about"]
+            if any(indicator in user_query.lower() for indicator in follow_up_indicators):
+                # This might be a follow-up question
+                prefix = "Based on our previous discussion and the codebase: "
+                return f"{prefix}{rag_answer}"
+        
+        return rag_answer
 
     def list_sessions(self, limit: int = 10) -> List[Dict[str, Any]]:
         try:

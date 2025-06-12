@@ -25,6 +25,8 @@ class ModelConfig:
         temperature: float = 0.7,
         model_path: Optional[str] = None,
         device: str = "auto",
+        context_window: Optional[int] = None,
+        context_mode: str = "balanced",
     ) -> None:
         self.provider = provider
         self.model_name = model_name
@@ -35,6 +37,8 @@ class ModelConfig:
         self.temperature = temperature
         self.model_path = model_path
         self.device = device
+        self.context_window = context_window
+        self.context_mode = context_mode
 
 
 class EmbeddingConfig:

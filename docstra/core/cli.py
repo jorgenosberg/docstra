@@ -584,6 +584,9 @@ def analyze(
     impact: bool = typer.Option(
         False, "--impact", help="Show change impact analysis"
     ),
+    context_mode: Optional[str] = typer.Option(
+        None, "--context-mode", help="Context mode: compact, balanced, detailed"
+    ),
     complexity: bool = typer.Option(
         False, "--complexity", help="Show detailed complexity metrics"
     ),
@@ -642,6 +645,14 @@ def analyze(
             from docstra.core.services.repository_explorer_service import RepositoryExplorerService
             
             user_config = load_or_init_config(config_path)
+            
+            # Apply context mode override if provided
+            if context_mode:
+                if context_mode not in ["compact", "balanced", "detailed"]:
+                    console.print(f"[{Colors.ERROR_BOLD}]Error: Invalid context mode '{context_mode}'. Must be: compact, balanced, detailed[/]")
+                    sys.exit(1)
+                user_config.model.context_mode = context_mode
+            
             explorer_service = RepositoryExplorerService(user_config, console)
             
             file_relationships = explorer_service.get_file_relationships(file_path)
@@ -755,6 +766,9 @@ def generate(
     ),
     port: int = typer.Option(
         8000, "--port", "-p", help="Port to serve documentation on"
+    ),
+    context_mode: Optional[str] = typer.Option(
+        None, "--context-mode", help="Context mode: compact, balanced, detailed"
     ),
     wizard: bool = typer.Option(
         True, "--wizard/--no-wizard", help="Run interactive configuration wizard"
@@ -972,6 +986,14 @@ def generate(
 
     # Use the documentation service for better progress reporting
     user_config = load_or_init_config()
+    
+    # Apply context mode override if provided
+    if context_mode:
+        if context_mode not in ["compact", "balanced", "detailed"]:
+            console.print(f"[{Colors.ERROR_BOLD}]Error: Invalid context mode '{context_mode}'. Must be: compact, balanced, detailed[/]")
+            return
+        user_config.model.context_mode = context_mode
+    
     _, _, _, documentation_service = create_services_for_config(user_config)
     
     # Generate documentation using the service
@@ -1500,10 +1522,20 @@ def query(
     detailed: bool = typer.Option(
         False, "--detailed", help="Show detailed analysis and relationships"
     ),
+    context_mode: Optional[str] = typer.Option(
+        None, "--context-mode", help="Context mode: compact, balanced, detailed"
+    ),
 ) -> None:
     """Ask a question about the codebase and get a precise answer with enhanced context."""
     # Get configuration
     user_config = load_or_init_config(config_path)
+    
+    # Apply context mode override if provided
+    if context_mode:
+        if context_mode not in ["compact", "balanced", "detailed"]:
+            console.print(f"[{Colors.ERROR_BOLD}]Error: Invalid context mode '{context_mode}'. Must be: compact, balanced, detailed[/]")
+            raise typer.Exit(code=1)
+        user_config.model.context_mode = context_mode
 
     # Create query service for this operation
     _, query_service_with_config, _, _ = create_services_for_config(user_config)
@@ -1650,10 +1682,20 @@ def chat(
     delete_session: Optional[str] = typer.Option(
         None, "--delete", "-d", help="Delete a chat session by ID"
     ),
+    context_mode: Optional[str] = typer.Option(
+        None, "--context-mode", help="Context mode: compact, balanced, detailed"
+    ),
 ) -> None:
     """Start an interactive chat session with the codebase assistant."""
     # Get configuration
     user_config = load_or_init_config(config_path)
+    
+    # Apply context mode override if provided
+    if context_mode:
+        if context_mode not in ["compact", "balanced", "detailed"]:
+            console.print(f"[{Colors.ERROR_BOLD}]Error: Invalid context mode '{context_mode}'. Must be: compact, balanced, detailed[/]")
+            raise typer.Exit(code=1)
+        user_config.model.context_mode = context_mode
 
     # Create chat service for this operation
     _, _, chat_service, _ = create_services_for_config(user_config)
@@ -1754,6 +1796,12 @@ def chat(
 
             # Display the response
             console.print(f"\n[Assistant]: {response}")
+            
+            # Display token usage information 
+            budget_info = chat_service.budget_manager.get_budget_info()
+            console.print(f"\n[{Colors.DIM}]Context: {budget_info['mode']} mode, "
+                         f"{budget_info['context_budget']:,} token budget "
+                         f"({budget_info['budget_percentage']:.0f}% of {budget_info['max_context']:,})[/]")
 
         except KeyboardInterrupt:
             console.print(f"\n[{Colors.BOLD}]Chat session interrupted.[/]")

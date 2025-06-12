@@ -19,6 +19,8 @@ from docstra.core.ingestion.storage import ChromaDBStorage
 from docstra.core.retrieval.chroma import ChromaRetriever
 from docstra.core.indexing.code_index import CodebaseIndexer
 from docstra.core.retrieval.hybrid import HybridRetriever
+from docstra.core.retrieval.context_aware import ContextAwareRetriever
+from docstra.core.utils.token_counter import get_token_counter, ContextBudgetManager
 
 
 def _get_llm_client_for_service(
@@ -93,13 +95,22 @@ class QueryService:
         self.retriever: Optional[ChromaRetriever] = None
         self.code_indexer: Optional[CodebaseIndexer] = None
         self.hybrid_retriever: Optional[HybridRetriever] = None
+        self.context_aware_retriever: Optional[ContextAwareRetriever] = None
+        self.token_counter = get_token_counter(
+            self.user_config.model.model_name, 
+            self.user_config.model.provider
+        )
+        self.budget_manager = ContextBudgetManager(
+            self.token_counter,
+            self.user_config.model.context_mode
+        )
         self._retrieval_initialized_for_path: Optional[Path] = None
 
     def _ensure_retrieval_components_initialized(self, abs_codebase_path: Path):
         """Initializes or re-initializes retrieval components if the codebase path has changed."""
         if (
             self._retrieval_initialized_for_path == abs_codebase_path
-            and self.hybrid_retriever
+            and self.context_aware_retriever
         ):
             self.console.print(
                 f"[debug]QueryService: Retrieval components already initialized for {abs_codebase_path}[/debug]",
@@ -147,6 +158,14 @@ class QueryService:
             self.hybrid_retriever = HybridRetriever(
                 self.retriever, code_index_instance
             )
+            
+            # Initialize context-aware retriever
+            self.context_aware_retriever = ContextAwareRetriever(
+                base_retriever=self.retriever,
+                budget_manager=self.budget_manager,
+                code_index=code_index_instance
+            )
+            
             self._retrieval_initialized_for_path = abs_codebase_path
             self.console.print(
                 f"[debug]QueryService: Retrieval components initialized successfully for {abs_codebase_path}[/debug]",
@@ -163,7 +182,7 @@ class QueryService:
         self, question: str, codebase_path_str: str, n_results: int = 5
     ) -> Tuple[str, List[Dict[str, Any]]]:
         """
-        Answers a question about the codebase using retrieval and LLM.
+        Answers a question about the codebase using context-aware retrieval and LLM.
         """
         abs_codebase_path = Path(codebase_path_str).resolve()
 
@@ -172,47 +191,90 @@ class QueryService:
         except (FileNotFoundError, ValueError) as e:
             return f"Error: Could not initialize components for querying. {e}", []
 
-        if not self.hybrid_retriever:
-            return "Error: Hybrid retriever not initialized.", []
+        if not self.context_aware_retriever:
+            return "Error: Context-aware retriever not initialized.", []
 
+        # Show context information
+        budget_info = self.budget_manager.get_budget_info()
         self.console.print(f"Querying codebase at: [cyan]{abs_codebase_path}[/cyan]")
         self.console.print(f"Question: [bold yellow]{question}[/bold yellow]")
+        self.console.print(
+            f"Context mode: [green]{budget_info['mode']}[/green] "
+            f"(~{budget_info['context_budget']:,} tokens, "
+            f"{budget_info['budget_percentage']:.0f}% of {budget_info['max_context']:,} token limit)"
+        )
 
-        retrieved_chunks: List[Dict[str, Any]] = []
+        context_result: Dict[str, Any] = {}
         with self.console.status("[cyan]Searching codebase context...", spinner="dots"):
             try:
-                retrieved_chunks = self.hybrid_retriever.retrieve(
-                    query=question, n_results=n_results, use_code_context=True
+                context_result = self.context_aware_retriever.retrieve_with_budget(
+                    query=question, context_type="query"
                 )
+                
+                tokens_used = context_result.get("total_tokens", 0)
+                strategy = context_result.get("retrieval_strategy", "unknown")
+                
                 self.console.print(
-                    f"[debug]Retrieved {len(retrieved_chunks)} chunks.[/debug]",
+                    f"[debug]Retrieved context using {strategy} strategy. "
+                    f"Used {tokens_used:,} tokens ({context_result.get('budget_used', 0):.1f}% of budget).[/debug]",
                     style="dim",
                 )
             except Exception as e:
                 self.console.print(f"[bold red]Error during retrieval: {e}[/]")
                 return f"Error during retrieval: {e}", []
 
-        answer_text = "Could not generate an answer."
-        if not retrieved_chunks:
+        # Prepare context for LLM
+        context_parts = context_result.get("context_parts", {})
+        if not context_parts:
             self.console.print(
                 "[yellow]No relevant context found in the codebase for your query. Attempting to answer without specific context...[/yellow]"
             )
-            # Fallback: try to answer with the LLM without specific context from retrieval
-            # The llm_client.answer_question might need to handle context=None or context=[]
-            # For now, we'll pass an empty list for context.
-            pass  # Continue to LLM call with empty context
+            formatted_context = []
+        else:
+            # Convert context parts to format expected by LLM
+            formatted_context = self._format_context_for_llm(context_parts)
 
         with self.console.status("[cyan]Generating answer with LLM...", spinner="dots"):
             try:
-                # The llm_client.answer_question method is expected to handle the list of dicts (chunks)
-                # or an empty list if no context was found.
                 answer_text = self.llm_client.answer_question(
-                    question=question, context=retrieved_chunks
+                    question=question, context=formatted_context
                 )
+                
+                # Show final token usage
+                answer_tokens = self.token_counter.count_tokens(str(answer_text))
+                total_tokens = context_result.get("total_tokens", 0) + answer_tokens
+                
+                self.console.print(
+                    f"[debug]Response generated. Answer: {answer_tokens:,} tokens, "
+                    f"Total: {total_tokens:,} tokens.[/debug]",
+                    style="dim",
+                )
+                
             except Exception as e:
                 self.console.print(
                     f"[bold red]Error during LLM answer generation: {e}[/]"
                 )
-                return f"Error during LLM answer generation: {e}", retrieved_chunks
+                return f"Error during LLM answer generation: {e}", formatted_context
 
-        return answer_text, retrieved_chunks
+        return answer_text, formatted_context
+
+    def _format_context_for_llm(self, context_parts: Dict[str, str]) -> List[Dict[str, Any]]:
+        """Format context parts into the format expected by LLM clients."""
+        
+        formatted_chunks = []
+        
+        for section_name, content in context_parts.items():
+            # Create a pseudo-chunk that looks like retrieval results
+            chunk = {
+                "id": f"context_{section_name}",
+                "content": content,
+                "metadata": {
+                    "document_id": f"context_{section_name}",
+                    "chunk_type": section_name,
+                    "section": section_name
+                },
+                "score": 0.0  # High relevance for context
+            }
+            formatted_chunks.append(chunk)
+        
+        return formatted_chunks
