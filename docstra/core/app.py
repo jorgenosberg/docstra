@@ -28,7 +28,9 @@ async def generate_docs(
     # Process each uploaded file
     file_paths = []
     for file in files:
-        file_path = temp_dir / file.filename
+        # Handle case where filename might be None
+        filename = file.filename or "uploaded_file"
+        file_path = temp_dir / filename
         with open(file_path, "wb") as f:
             content = await file.read()
             f.write(content)
