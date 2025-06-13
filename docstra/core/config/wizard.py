@@ -586,6 +586,8 @@ class ConfigWizard:
                         self.global_config_manager, field, value
                     )
 
+            # Save global configuration
+            self.global_config_manager.save()
             self.console.print(f"[{Colors.SUCCESS}]Global configuration updated.[/]")
 
         # Configure local settings
@@ -604,6 +606,8 @@ class ConfigWizard:
                         self.local_config_manager, field, value
                     )
 
+            # Save local configuration
+            self.local_config_manager.save()
             self.console.print(f"[{Colors.SUCCESS}]Local configuration updated.[/]")
 
     def run_init_wizard(self) -> None:
@@ -658,6 +662,9 @@ class ConfigWizard:
                         self.local_config_manager, field, value
                     )
 
+        # Save the local configuration
+        self.local_config_manager.save()
+        
         self.console.print(f"[{Colors.SUCCESS_BOLD}]Project initialized successfully![/]")
         self.console.print(
             f"Local configuration saved to: [{Colors.HIGHLIGHT}]{self.local_config_manager.config_path}[/]"
