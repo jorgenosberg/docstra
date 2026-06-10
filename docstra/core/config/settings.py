@@ -10,7 +10,7 @@ class ModelProvider(str, Enum):
     OPENAI = "openai"
     OLLAMA = "ollama"
     LOCAL = "local"
-    
+
     def __str__(self) -> str:
         """Return the enum value instead of the full enum representation."""
         return self.value
@@ -128,6 +128,7 @@ class ConfigManager:
 
     def update(self, **kwargs: Any) -> None:
         """Update configuration with provided key-value pairs."""
+
         def _update_nested(obj: Any, path_parts: List[str], value: Any) -> None:
             if len(path_parts) == 1:
                 if hasattr(obj, path_parts[0]):
@@ -136,7 +137,7 @@ class ConfigManager:
                 if hasattr(obj, path_parts[0]):
                     next_obj = getattr(obj, path_parts[0])
                     _update_nested(next_obj, path_parts[1:], value)
-        
+
         def _update_from_dict(obj: Any, data: dict, parent_key: str = "") -> None:
             """Recursively update object from nested dictionary"""
             for key, value in data.items():
@@ -144,12 +145,16 @@ class ConfigManager:
                     # Get the nested object
                     if hasattr(obj, key):
                         nested_obj = getattr(obj, key)
-                        _update_from_dict(nested_obj, value, f"{parent_key}.{key}" if parent_key else key)
+                        _update_from_dict(
+                            nested_obj,
+                            value,
+                            f"{parent_key}.{key}" if parent_key else key,
+                        )
                 else:
                     # Set the value
                     if hasattr(obj, key):
                         setattr(obj, key, value)
-        
+
         # Process all kwargs
         _update_from_dict(self.config, kwargs)
 
@@ -161,7 +166,7 @@ class ConfigManager:
         """Load configuration from file."""
         if os.path.exists(self.config_path):
             self.config.load_from_file(self.config_path)
-    
+
     def save(self) -> None:
         """Save configuration to file."""
         self.config.save_to_file(self.config_path)
@@ -180,101 +185,101 @@ class UserConfig:
         """Save configuration to YAML file."""
         # Ensure directory exists
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Convert configuration to dictionary
         config_dict = {
-            'model': {
-                'provider': str(self.model.provider),
-                'model_name': self.model.model_name,
-                'model_name_chat': self.model.model_name_chat,
-                'api_key': self.model.api_key,
-                'api_base': self.model.api_base,
-                'max_tokens': self.model.max_tokens,
-                'temperature': self.model.temperature,
-                'model_path': self.model.model_path,
-                'device': self.model.device,
-                'context_window': self.model.context_window,
-                'context_mode': self.model.context_mode,
+            "model": {
+                "provider": str(self.model.provider),
+                "model_name": self.model.model_name,
+                "model_name_chat": self.model.model_name_chat,
+                "api_key": self.model.api_key,
+                "api_base": self.model.api_base,
+                "max_tokens": self.model.max_tokens,
+                "temperature": self.model.temperature,
+                "model_path": self.model.model_path,
+                "device": self.model.device,
+                "context_window": self.model.context_window,
+                "context_mode": self.model.context_mode,
             },
-            'embedding': {
-                'provider': self.embedding.provider,
-                'model_name': self.embedding.model_name,
-                'api_key': self.embedding.api_key,
+            "embedding": {
+                "provider": self.embedding.provider,
+                "model_name": self.embedding.model_name,
+                "api_key": self.embedding.api_key,
             },
-            'storage': {
-                'persist_directory': self.storage.persist_directory,
+            "storage": {
+                "persist_directory": self.storage.persist_directory,
             },
-            'processing': {
-                'chunk_size': self.processing.chunk_size,
-                'chunk_overlap': self.processing.chunk_overlap,
-                'exclude_patterns': self.processing.exclude_patterns,
+            "processing": {
+                "chunk_size": self.processing.chunk_size,
+                "chunk_overlap": self.processing.chunk_overlap,
+                "exclude_patterns": self.processing.exclude_patterns,
             },
-            'ingestion': {
-                'include_dirs': self.ingestion.include_dirs,
-                'exclude_patterns': self.ingestion.exclude_patterns,
+            "ingestion": {
+                "include_dirs": self.ingestion.include_dirs,
+                "exclude_patterns": self.ingestion.exclude_patterns,
             },
-            'documentation': self.documentation.model_dump(),
+            "documentation": self.documentation.model_dump(),
         }
-        
+
         # Write to YAML file
-        with open(path, 'w') as f:
+        with open(path, "w") as f:
             yaml.dump(config_dict, f, default_flow_style=False, indent=2)
-    
+
     def load_from_file(self, path: str) -> None:
         """Load configuration from YAML file."""
-        with open(path, 'r') as f:
+        with open(path, "r") as f:
             config_dict = yaml.safe_load(f)
-        
+
         if not config_dict:
             return
-        
+
         # Update model configuration
-        if 'model' in config_dict:
-            model_data = config_dict['model']
-            if 'provider' in model_data:
-                self.model.provider = ModelProvider(model_data['provider'])
-            if 'model_name' in model_data:
-                self.model.model_name = model_data['model_name']
-            if 'model_name_chat' in model_data:
-                self.model.model_name_chat = model_data['model_name_chat']
-            if 'api_key' in model_data:
-                self.model.api_key = model_data['api_key']
-            if 'api_base' in model_data:
-                self.model.api_base = model_data['api_base']
-            if 'max_tokens' in model_data:
-                self.model.max_tokens = model_data['max_tokens']
-            if 'temperature' in model_data:
-                self.model.temperature = model_data['temperature']
-            if 'model_path' in model_data:
-                self.model.model_path = model_data['model_path']
-            if 'device' in model_data:
-                self.model.device = model_data['device']
-            if 'context_window' in model_data:
-                self.model.context_window = model_data['context_window']
-            if 'context_mode' in model_data:
-                self.model.context_mode = model_data['context_mode']
-        
+        if "model" in config_dict:
+            model_data = config_dict["model"]
+            if "provider" in model_data:
+                self.model.provider = ModelProvider(model_data["provider"])
+            if "model_name" in model_data:
+                self.model.model_name = model_data["model_name"]
+            if "model_name_chat" in model_data:
+                self.model.model_name_chat = model_data["model_name_chat"]
+            if "api_key" in model_data:
+                self.model.api_key = model_data["api_key"]
+            if "api_base" in model_data:
+                self.model.api_base = model_data["api_base"]
+            if "max_tokens" in model_data:
+                self.model.max_tokens = model_data["max_tokens"]
+            if "temperature" in model_data:
+                self.model.temperature = model_data["temperature"]
+            if "model_path" in model_data:
+                self.model.model_path = model_data["model_path"]
+            if "device" in model_data:
+                self.model.device = model_data["device"]
+            if "context_window" in model_data:
+                self.model.context_window = model_data["context_window"]
+            if "context_mode" in model_data:
+                self.model.context_mode = model_data["context_mode"]
+
         # Update embedding configuration
-        if 'embedding' in config_dict:
-            embedding_data = config_dict['embedding']
-            if 'provider' in embedding_data:
-                self.embedding.provider = embedding_data['provider']
-            if 'model_name' in embedding_data:
-                self.embedding.model_name = embedding_data['model_name']
-            if 'api_key' in embedding_data:
-                self.embedding.api_key = embedding_data['api_key']
-        
+        if "embedding" in config_dict:
+            embedding_data = config_dict["embedding"]
+            if "provider" in embedding_data:
+                self.embedding.provider = embedding_data["provider"]
+            if "model_name" in embedding_data:
+                self.embedding.model_name = embedding_data["model_name"]
+            if "api_key" in embedding_data:
+                self.embedding.api_key = embedding_data["api_key"]
+
         # Update other configurations as needed
-        if 'storage' in config_dict:
-            storage_data = config_dict['storage']
-            if 'persist_directory' in storage_data:
-                self.storage.persist_directory = storage_data['persist_directory']
-        
-        if 'processing' in config_dict:
-            processing_data = config_dict['processing']
-            if 'chunk_size' in processing_data:
-                self.processing.chunk_size = processing_data['chunk_size']
-            if 'chunk_overlap' in processing_data:
-                self.processing.chunk_overlap = processing_data['chunk_overlap']
-            if 'exclude_patterns' in processing_data:
-                self.processing.exclude_patterns = processing_data['exclude_patterns']
+        if "storage" in config_dict:
+            storage_data = config_dict["storage"]
+            if "persist_directory" in storage_data:
+                self.storage.persist_directory = storage_data["persist_directory"]
+
+        if "processing" in config_dict:
+            processing_data = config_dict["processing"]
+            if "chunk_size" in processing_data:
+                self.processing.chunk_size = processing_data["chunk_size"]
+            if "chunk_overlap" in processing_data:
+                self.processing.chunk_overlap = processing_data["chunk_overlap"]
+            if "exclude_patterns" in processing_data:
+                self.processing.exclude_patterns = processing_data["exclude_patterns"]

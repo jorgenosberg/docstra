@@ -21,11 +21,14 @@ try:
 except ImportError:
     raise ImportError(
         "Local model support requires transformers and torch. "
-        "Install with: pip install transformers torch"
+        "Install the project dependencies with: uv sync"
     )
 
 from docstra.core.llm.prompt import PromptBuilder
-from docstra.core.tracking.llm_tracker import get_global_tracker
+from docstra.core.tracking.llm_tracker import (
+    UniversalLLMTracker,
+    get_global_tracker,
+)
 
 
 class KeywordsStoppingCriteria(StoppingCriteria):
@@ -87,9 +90,9 @@ class LocalModelClient:
 
         # Initialize tracker
         if self.enable_tracking:
-            self.tracker = get_global_tracker()
+            self.tracker: Optional[UniversalLLMTracker] = get_global_tracker()
         else:
-            self.tracker = None  # type: ignore
+            self.tracker = None
 
         # Initialize model and tokenizer
         print(f"Loading model {self.model_path} on {self.device}...")
@@ -116,7 +119,12 @@ class LocalModelClient:
         # Initialize prompt builder
         self.prompt_builder = PromptBuilder()
 
-    def generate(self, prompt: str, stream: bool = False, metadata: Optional[Dict[str, Any]] = None) -> str:
+    def generate(
+        self,
+        prompt: str,
+        stream: bool = False,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Generate a response from the local model.
 
         Args:
@@ -128,7 +136,7 @@ class LocalModelClient:
             Generated response
         """
         start_time = time.perf_counter()
-        
+
         try:
             # Tokenize the prompt
             inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
@@ -190,11 +198,13 @@ class LocalModelClient:
             if self.tracker:
                 end_time = time.perf_counter()
                 duration_ms = (end_time - start_time) * 1000
-                
+
                 # For local models, we can get exact token counts
                 input_tokens = inputs.input_ids.shape[1]
-                output_tokens = len(self.tokenizer.encode(output_text, add_special_tokens=False))
-                
+                output_tokens = len(
+                    self.tokenizer.encode(output_text, add_special_tokens=False)
+                )
+
                 self.tracker.track_llm_call(
                     provider="local",
                     model=self.model_name,
@@ -207,7 +217,7 @@ class LocalModelClient:
                 )
 
             return output_text
-            
+
         except Exception as e:
             # Track error if tracking enabled
             if self.tracker:
@@ -215,7 +225,7 @@ class LocalModelClient:
                 duration_ms = (end_time - start_time) * 1000
                 error_metadata = (metadata or {}).copy()
                 error_metadata.update({"error": str(e), "status": "error"})
-                
+
                 self.tracker.track_llm_call(
                     provider="local",
                     model=self.model_name,
@@ -226,7 +236,7 @@ class LocalModelClient:
                     output_tokens=0,
                     metadata=error_metadata,
                 )
-            
+
             print(f"Error in local model generation: {str(e)}")
             raise
 
@@ -252,7 +262,11 @@ class LocalModelClient:
             code=code, language=language, additional_context=additional_context
         )
 
-        return self.generate(prompt, stream=stream, metadata={"request_type": "document_code", "language": language})
+        return self.generate(
+            prompt,
+            stream=stream,
+            metadata={"request_type": "document_code", "language": language},
+        )
 
     def explain_code(
         self,
@@ -276,7 +290,11 @@ class LocalModelClient:
             code=code, language=language, additional_context=additional_context
         )
 
-        return self.generate(prompt, stream=stream, metadata={"request_type": "explain_code", "language": language})
+        return self.generate(
+            prompt,
+            stream=stream,
+            metadata={"request_type": "explain_code", "language": language},
+        )
 
     def answer_question(
         self,
@@ -305,11 +323,15 @@ class LocalModelClient:
         elif isinstance(context, list):
             context_size = sum(len(str(item)) for item in context)
 
-        return self.generate(prompt, stream=stream, metadata={
-            "request_type": "answer_question", 
-            "context_size": context_size,
-            "question_length": len(question)
-        })
+        return self.generate(
+            prompt,
+            stream=stream,
+            metadata={
+                "request_type": "answer_question",
+                "context_size": context_size,
+                "question_length": len(question),
+            },
+        )
 
     def generate_examples(
         self,
@@ -333,7 +355,11 @@ class LocalModelClient:
             request=request, language=language, additional_context=additional_context
         )
 
-        return self.generate(prompt, stream=stream, metadata={"request_type": "generate_examples", "language": language})
+        return self.generate(
+            prompt,
+            stream=stream,
+            metadata={"request_type": "generate_examples", "language": language},
+        )
 
     def custom_request(self, template_name: str, stream: bool = False, **kwargs) -> str:
         """Make a custom request using a template.
@@ -350,7 +376,11 @@ class LocalModelClient:
             template_name=template_name, **kwargs
         )
 
-        return self.generate(prompt, stream=stream, metadata={"request_type": "custom", "template": template_name})
+        return self.generate(
+            prompt,
+            stream=stream,
+            metadata={"request_type": "custom", "template": template_name},
+        )
 
     def add_template(self, name: str, template: str) -> None:
         """Add a new template or override an existing one.

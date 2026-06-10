@@ -652,82 +652,94 @@ class RepositoryMap:
 
         analyze_node(self.root)
         return overview
-    
+
     def get_cross_references(self, file_path: str) -> List[Dict[str, str]]:
         """Get cross-references for a file (imports, usage, etc.)."""
         cross_refs: List[Dict[str, str]] = []
         node = self.find_file(file_path)
-        
+
         if not node:
             return cross_refs
-        
+
         # Add imports as cross-references
         for import_path in node.dependencies:
-            cross_refs.append({
-                "file": import_path,
-                "type": "import",
-                "description": f"Imports from {os.path.basename(import_path)}"
-            })
-        
+            cross_refs.append(
+                {
+                    "file": import_path,
+                    "type": "import",
+                    "description": f"Imports from {os.path.basename(import_path)}",
+                }
+            )
+
         # Add files that depend on this one
         for dependent_path in node.dependents:
-            cross_refs.append({
-                "file": dependent_path,
-                "type": "imported_by",
-                "description": f"Used by {os.path.basename(dependent_path)}"
-            })
-        
+            cross_refs.append(
+                {
+                    "file": dependent_path,
+                    "type": "imported_by",
+                    "description": f"Used by {os.path.basename(dependent_path)}",
+                }
+            )
+
         # Add related files (same module/package)
         related_files = self.get_related_files(file_path)
         for related_path in related_files:
-            if related_path != file_path and related_path not in [ref["file"] for ref in cross_refs]:
-                cross_refs.append({
-                    "file": related_path,
-                    "type": "related",
-                    "description": f"Related file in same module: {os.path.basename(related_path)}"
-                })
-        
+            if related_path != file_path and related_path not in [
+                ref["file"] for ref in cross_refs
+            ]:
+                cross_refs.append(
+                    {
+                        "file": related_path,
+                        "type": "related",
+                        "description": f"Related file in same module: {os.path.basename(related_path)}",
+                    }
+                )
+
         return cross_refs
-    
-    def get_change_impact_analysis(self, changed_files: List[str]) -> Dict[str, List[str]]:
+
+    def get_change_impact_analysis(
+        self, changed_files: List[str]
+    ) -> Dict[str, List[str]]:
         """Analyze the impact of changes to specific files."""
         impact_map = {}
-        
+
         for file_path in changed_files:
             impacted_files = set()
-            
+
             # Direct dependents (files that import this one)
             node = self.find_file(file_path)
             if node:
                 impacted_files.update(node.dependents)
-                
+
                 # Indirect impact through dependency chain
                 for dependent in node.dependents:
                     dependent_node = self.find_file(dependent)
                     if dependent_node:
                         impacted_files.update(dependent_node.dependents)
-            
+
             # If no node found, try to find impact through symbol usage
             if not node and self.index:
                 file_metadata = self.index.get_file_metadata(file_path)
                 if file_metadata:
                     # Find files that use symbols from this file
-                    for symbol in file_metadata.get('functions', []) + file_metadata.get('classes', []):
+                    for symbol in file_metadata.get(
+                        "functions", []
+                    ) + file_metadata.get("classes", []):
                         symbol_usages = self.index.search_symbol(symbol)
                         for usage in symbol_usages:
-                            if usage['filepath'] != file_path:
-                                impacted_files.add(usage['filepath'])
-            
+                            if usage["filepath"] != file_path:
+                                impacted_files.add(usage["filepath"])
+
             impact_map[file_path] = list(impacted_files)
-        
+
         return impact_map
-    
+
     def get_documentation_context_for_file(self, file_path: str) -> Dict[str, Any]:
         """Get comprehensive context for documentation generation."""
         node = self.find_file(file_path)
         if not node:
             return {}
-        
+
         context = {
             "file_info": {
                 "path": file_path,
@@ -752,9 +764,9 @@ class RepositoryMap:
                 "is_core_module": len(node.dependents) > 3,  # Many files depend on it
                 "is_leaf_module": len(node.dependencies) == 0,  # No dependencies
                 "centrality_score": len(node.dependents) + len(node.dependencies),
-            }
+            },
         }
-        
+
         return context
 
     def to_dict(self) -> Dict[str, Any]:

@@ -3,7 +3,6 @@
 Service responsible for generating documentation for the codebase.
 """
 
-import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -21,6 +20,7 @@ from rich.progress import (
 from docstra.core.config.settings import DocumentationConfig, ModelProvider, UserConfig
 from docstra.core.document_processing.document import Document
 from docstra.core.document_processing.extractor import DocumentProcessor
+
 # Old generator import removed - now using EnhancedDocumentationGenerator
 from docstra.core.indexing.code_index import (
     CodebaseIndexer,
@@ -36,6 +36,7 @@ from docstra.core.retrieval.chroma import ChromaRetriever
 from docstra.core.services.chat_service import (
     _get_llm_client_for_chat_service as _get_llm_client_for_doc_service,
 )
+
 # Import incremental documentation components
 from docstra.core.documentation.dependencies import DocumentationDependencyTracker
 from docstra.core.documentation.overrides import DocumentationOverrideManager
@@ -73,7 +74,7 @@ class DocumentationService:
             self.user_config, self.callbacks
         )
         self.document_processor = DocumentProcessor()
-        
+
         # Initialize incremental documentation components
         self.dependency_tracker: Optional[DocumentationDependencyTracker] = None
         self.override_manager: Optional[DocumentationOverrideManager] = None
@@ -108,9 +109,6 @@ class DocumentationService:
         effective_project_description = (
             project_description_str or self.doc_config.project_description or ""
         )
-        effective_theme = theme_str or self.doc_config.theme
-        effective_structure = structure_str or self.doc_config.documentation_structure
-        effective_module_depth = module_depth_str or self.doc_config.module_doc_depth
         effective_llm_style_prompt = (
             llm_style_prompt_str or self.doc_config.llm_style_prompt
         )
@@ -164,9 +162,11 @@ class DocumentationService:
         if not base_persist_path.is_absolute():
             base_persist_path = input_path_abs / persist_dir_name
         abs_persist_directory = base_persist_path.resolve()
-        
+
         # Initialize incremental documentation components
-        self.dependency_tracker = DocumentationDependencyTracker(str(abs_persist_directory))
+        self.dependency_tracker = DocumentationDependencyTracker(
+            str(abs_persist_directory)
+        )
         self.override_manager = DocumentationOverrideManager(str(abs_persist_directory))
         self.change_detector = ChangeDetectionService(str(abs_persist_directory))
 
@@ -243,12 +243,10 @@ class DocumentationService:
                 if temp_code_index:
                     # Create repo map from documents instead of loading from dict
                     repo_map = RepositoryMap.from_documents(
-                        documents_for_generation, 
-                        str(input_path_abs),
-                        temp_code_index
+                        documents_for_generation, str(input_path_abs), temp_code_index
                     )
                     self.console.print(
-                        f"[dim]Repo map created from documents and index.[/dim]"
+                        "[dim]Repo map created from documents and index.[/dim]"
                     )
             except Exception as e_map:
                 self.console.print(
@@ -278,15 +276,18 @@ class DocumentationService:
         code_index = None
         if abs_persist_directory and (abs_persist_directory / "index").exists():
             try:
-                from docstra.core.indexing.code_index import CodebaseIndexer
-                indexer = CodebaseIndexer(index_directory=str(abs_persist_directory / "index"))
+                indexer = CodebaseIndexer(
+                    index_directory=str(abs_persist_directory / "index")
+                )
                 code_index = indexer.get_index()
             except Exception as e:
-                self.console.print(f"[yellow]Warning: Could not load code index: {e}[/yellow]")
-        
+                self.console.print(
+                    f"[yellow]Warning: Could not load code index: {e}[/yellow]"
+                )
+
         # Import the enhanced generator
         from docstra.core.documentation.generator import DocumentationGenerator
-        
+
         doc_generator = DocumentationGenerator(
             llm_client=self.llm_client,
             output_dir=effective_output_dir,
@@ -311,7 +312,7 @@ class DocumentationService:
                 generate_api_docs=True,
                 generate_cross_references=True,
             )
-            
+
             if success:
                 self.console.print(
                     "[bold green]Documentation generation process finished.[/bold green]"
@@ -330,129 +331,149 @@ class DocumentationService:
                 f"[bold red]Error during documentation generation: {e_gen}[/bold red]"
             )
             return False
-    
+
     def generate_incremental_documentation(
         self,
         input_path_str: str,
         output_dir_str: Optional[str] = None,
         base_ref: str = "HEAD~1",
         force_files: Optional[List[str]] = None,
-        **kwargs
+        **kwargs,
     ) -> bool:
         """Generate documentation incrementally based on detected changes.
-        
+
         Args:
             input_path_str: Path to the codebase
             output_dir_str: Output directory for documentation
             base_ref: Git reference to compare against for changes
             force_files: List of files to force regeneration
             **kwargs: Additional arguments passed to generate_documentation
-            
+
         Returns:
             True if successful, False otherwise
         """
         input_path_abs = Path(input_path_str).resolve()
-        
+
         # Setup persist directory
         persist_dir_name = self.user_config.storage.persist_directory
         base_persist_path = Path(persist_dir_name)
         if not base_persist_path.is_absolute():
             base_persist_path = input_path_abs / persist_dir_name
         abs_persist_directory = base_persist_path.resolve()
-        
+
         # Initialize services
         dependency_tracker = DocumentationDependencyTracker(str(abs_persist_directory))
         override_manager = DocumentationOverrideManager(str(abs_persist_directory))
         change_detector = ChangeDetectionService(str(abs_persist_directory))
-        
-        self.console.print(Panel("Incremental Documentation Generation", style="bold green"))
-        
+
+        self.console.print(
+            Panel("Incremental Documentation Generation", style="bold green")
+        )
+
         # Detect changes
         if force_files:
             change_analysis = change_detector.detect_changes_from_file_list(force_files)
-            self.console.print(f"[yellow]Forced regeneration for {len(force_files)} files[/yellow]")
+            self.console.print(
+                f"[yellow]Forced regeneration for {len(force_files)} files[/yellow]"
+            )
         else:
-            change_analysis = change_detector.detect_changes_from_git(str(input_path_abs), base_ref)
-            self.console.print(f"[dim]Detected changes using Git (base: {base_ref})[/dim]")
-        
+            change_analysis = change_detector.detect_changes_from_git(
+                str(input_path_abs), base_ref
+            )
+            self.console.print(
+                f"[dim]Detected changes using Git (base: {base_ref})[/dim]"
+            )
+
         if not change_analysis.has_changes:
-            self.console.print("[green]No changes detected. Documentation is up to date.[/green]")
+            self.console.print(
+                "[green]No changes detected. Documentation is up to date.[/green]"
+            )
             return True
-        
-        self.console.print(f"[cyan]Changes detected:[/cyan]")
+
+        self.console.print("[cyan]Changes detected:[/cyan]")
         self.console.print(f"  • Changed files: {len(change_analysis.changed_files)}")
         self.console.print(f"  • New files: {len(change_analysis.new_files)}")
         self.console.print(f"  • Deleted files: {len(change_analysis.deleted_files)}")
-        
+
         # Get impacted documentation
         all_changed_files = change_analysis.changed_files + change_analysis.new_files
         impacted_docs = dependency_tracker.get_impacted_documentation(all_changed_files)
-        
-        self.console.print(f"[yellow]Impacted documentation pages: {len(impacted_docs)}[/yellow]")
-        
+
+        self.console.print(
+            f"[yellow]Impacted documentation pages: {len(impacted_docs)}[/yellow]"
+        )
+
         # Filter files through overrides
         files_to_process = []
         skipped_by_override = []
-        
+
         for file_path in all_changed_files:
             if override_manager.should_skip_generation(file_path):
                 skipped_by_override.append(file_path)
             else:
                 files_to_process.append(file_path)
-        
+
         if skipped_by_override:
-            self.console.print(f"[dim]Skipped {len(skipped_by_override)} files due to overrides[/dim]")
-        
+            self.console.print(
+                f"[dim]Skipped {len(skipped_by_override)} files due to overrides[/dim]"
+            )
+
         if not files_to_process:
-            self.console.print("[yellow]All changed files are skipped by overrides. Nothing to process.[/yellow]")
+            self.console.print(
+                "[yellow]All changed files are skipped by overrides. Nothing to process.[/yellow]"
+            )
             return True
-        
+
         # Generate documentation for changed files only
         self.console.print(f"[cyan]Processing {len(files_to_process)} files...[/cyan]")
-        
+
         # Prepare kwargs for incremental generation
         incremental_kwargs = kwargs.copy()
-        incremental_kwargs['incremental'] = True
-        
+        incremental_kwargs["incremental"] = True
+
         # Process files in smaller batches for incremental updates
         success = self.generate_documentation(
             input_path_str=input_path_str,
             output_dir_str=output_dir_str,
-            **incremental_kwargs
+            **incremental_kwargs,
         )
-        
+
         if success:
             # Mark generation as complete
             change_detector.mark_generation_complete(str(input_path_abs))
-            self.console.print("[bold green]Incremental documentation generation completed successfully![/bold green]")
+            self.console.print(
+                "[bold green]Incremental documentation generation completed successfully![/bold green]"
+            )
         else:
-            self.console.print("[bold red]Incremental documentation generation failed.[/bold red]")
-        
+            self.console.print(
+                "[bold red]Incremental documentation generation failed.[/bold red]"
+            )
+
         return success
-    
+
     def get_documentation_status(self, input_path_str: str) -> Dict[str, Any]:
         """Get status of documentation including changes and dependencies.
-        
+
         Args:
             input_path_str: Path to the codebase
-            
+
         Returns:
             Dictionary containing documentation status information
         """
         input_path_abs = Path(input_path_str).resolve()
-        
+
         # Setup persist directory
         persist_dir_name = self.user_config.storage.persist_directory
         base_persist_path = Path(persist_dir_name)
         if not base_persist_path.is_absolute():
             base_persist_path = input_path_abs / persist_dir_name
         abs_persist_directory = base_persist_path.resolve()
-        
+
         # Initialize services
         dependency_tracker = DocumentationDependencyTracker(str(abs_persist_directory))
         override_manager = DocumentationOverrideManager(str(abs_persist_directory))
         change_detector = ChangeDetectionService(str(abs_persist_directory))
-        
+
         # Get status information
         status = {
             "codebase_path": str(input_path_abs),
@@ -462,9 +483,11 @@ class DocumentationService:
             "outdated_docs": dependency_tracker.get_outdated_documentation(),
             "change_history": change_detector.get_change_history(5),
         }
-        
+
         # Detect current changes
-        change_analysis = change_detector.detect_changes_since_last_generation(str(input_path_abs))
+        change_analysis = change_detector.detect_changes_since_last_generation(
+            str(input_path_abs)
+        )
         status["current_changes"] = {
             "has_changes": change_analysis.has_changes,
             "total_changes": change_analysis.total_changes,
@@ -472,5 +495,5 @@ class DocumentationService:
             "new_files": len(change_analysis.new_files),
             "deleted_files": len(change_analysis.deleted_files),
         }
-        
+
         return status

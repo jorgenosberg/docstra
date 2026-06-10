@@ -134,13 +134,15 @@ class IngestionService:
         )
 
         # Collect files with suppressed logging
-        self.console.print(f"[cyan]Collecting files from:[/] [bold]{codebase_path_abs}[/]")
-        
+        self.console.print(
+            f"[cyan]Collecting files from:[/] [bold]{codebase_path_abs}[/]"
+        )
+
         # Temporarily suppress file collector logging to avoid duplication
         file_collector_logger = logging.getLogger("docstra.file_collector")
         original_level = file_collector_logger.level
         file_collector_logger.setLevel(logging.WARNING)
-        
+
         try:
             file_paths = collect_files(
                 base_path=str(codebase_path_abs),
@@ -163,7 +165,9 @@ class IngestionService:
 
         # Show embedding cost estimate if using OpenAI
         if user_config.embedding.provider.lower() == "openai":
-            self._show_embedding_cost_estimate(file_paths, user_config.embedding.model_name)
+            self._show_embedding_cost_estimate(
+                file_paths, user_config.embedding.model_name
+            )
 
         # Process, parse, chunk, and index files
         with Progress(
@@ -231,7 +235,9 @@ class IngestionService:
                 progress.update(task_chunk, advance=1)
 
             # Index documents (this is where embeddings are generated)
-            task_index = progress.add_task("[cyan]Generating embeddings and indexing...", total=None)
+            task_index = progress.add_task(
+                "[cyan]Generating embeddings and indexing...", total=None
+            )
 
             doc_indexer.index_documents(documents)
             code_indexer.index_documents(documents)
@@ -260,14 +266,20 @@ class IngestionService:
 
         # Show completion summary with embedding usage
         self._show_completion_summary(
-            len(documents), processing_errors, parsing_errors, chunking_errors, embedding_generator
+            len(documents),
+            processing_errors,
+            parsing_errors,
+            chunking_errors,
+            embedding_generator,
         )
-        
+
         return True
 
-    def _show_embedding_cost_estimate(self, file_paths: List[Path], model_name: str) -> None:
+    def _show_embedding_cost_estimate(
+        self, file_paths: List[Path], model_name: str
+    ) -> None:
         """Show an estimate of embedding costs for OpenAI models.
-        
+
         Args:
             file_paths: List of files to be processed
             model_name: OpenAI embedding model name
@@ -276,25 +288,32 @@ class IngestionService:
         # This is a conservative estimate since we don't know chunk count yet
         estimated_tokens_per_file = 800  # File content + estimated chunks
         total_estimated_tokens = len(file_paths) * estimated_tokens_per_file
-        
+
         # Get pricing
         from docstra.core.ingestion.embeddings import EmbeddingUsageTracker
+
         pricing = EmbeddingUsageTracker.OPENAI_EMBEDDING_PRICING.get(model_name, 0.0001)
         estimated_cost = (total_estimated_tokens / 1000) * pricing
-        
+
         # Show estimate
-        estimate_table = Table(title="Embedding Cost Estimate (OpenAI)", show_header=True, header_style="bold yellow")
+        estimate_table = Table(
+            title="Embedding Cost Estimate (OpenAI)",
+            show_header=True,
+            header_style="bold yellow",
+        )
         estimate_table.add_column("Metric", style="cyan")
         estimate_table.add_column("Value", justify="right", style="yellow")
-        
+
         estimate_table.add_row("Model", model_name)
         estimate_table.add_row("Files to process", str(len(file_paths)))
         estimate_table.add_row("Estimated tokens", f"{total_estimated_tokens:,}")
         estimate_table.add_row("Rate per 1K tokens", f"${pricing:.5f}")
         estimate_table.add_row("Estimated cost", f"${estimated_cost:.4f}")
-        
+
         self.console.print(estimate_table)
-        self.console.print("[dim]Note: This is a rough estimate. Actual usage may vary based on file content and chunking.[/]")
+        self.console.print(
+            "[dim]Note: This is a rough estimate. Actual usage may vary based on file content and chunking.[/]"
+        )
 
     def _show_collection_summary(self, file_paths: List[Path], base_path: Path) -> None:
         """Show a summary of collected files in a nice format."""
@@ -315,12 +334,14 @@ class IngestionService:
             ext_counts[ext] = ext_counts.get(ext, 0) + 1
 
         # Create summary table
-        table = Table(title="File Collection Summary", show_header=True, header_style="bold cyan")
+        table = Table(
+            title="File Collection Summary", show_header=True, header_style="bold cyan"
+        )
         table.add_column("Metric", style="cyan")
         table.add_column("Count", justify="right", style="green")
-        
+
         table.add_row("Total files found", str(len(file_paths)))
-        
+
         # Show top directories
         if dir_counts:
             top_dirs = sorted(dir_counts.items(), key=lambda x: x[1], reverse=True)[:5]
@@ -329,7 +350,7 @@ class IngestionService:
             for dir_name, count in top_dirs:
                 display_name = dir_name if dir_name != "." else "(root)"
                 table.add_row(f"  {display_name}", str(count))
-        
+
         # Show file types
         if ext_counts:
             top_exts = sorted(ext_counts.items(), key=lambda x: x[1], reverse=True)[:5]
@@ -341,71 +362,87 @@ class IngestionService:
         self.console.print(table)
 
     def _show_completion_summary(
-        self, 
-        successful_docs: int, 
-        processing_errors: int, 
-        parsing_errors: int, 
+        self,
+        successful_docs: int,
+        processing_errors: int,
+        parsing_errors: int,
         chunking_errors: int,
-        embedding_generator: Any
+        embedding_generator: Any,
     ) -> None:
         """Show a completion summary with statistics including embedding usage.
-        
+
         Args:
             successful_docs: Number of successfully processed documents
             processing_errors: Number of processing errors
-            parsing_errors: Number of parsing errors  
+            parsing_errors: Number of parsing errors
             chunking_errors: Number of chunking errors
             embedding_generator: The embedding generator used (for usage stats)
         """
         # Create completion panel
-        summary_text = f"[bold green]✓ Successfully processed {successful_docs} files[/]\n"
-        
+        summary_text = (
+            f"[bold green]✓ Successfully processed {successful_docs} files[/]\n"
+        )
+
         if processing_errors > 0:
             summary_text += f"[yellow]⚠ {processing_errors} processing errors[/]\n"
         if parsing_errors > 0:
             summary_text += f"[yellow]⚠ {parsing_errors} parsing errors[/]\n"
         if chunking_errors > 0:
             summary_text += f"[yellow]⚠ {chunking_errors} chunking errors[/]\n"
-            
+
         if processing_errors == 0 and parsing_errors == 0 and chunking_errors == 0:
             summary_text += "[green]No errors encountered during ingestion[/]"
-        
-        self.console.print(Panel(summary_text, title="[bold green]Ingestion Complete[/]", expand=False))
+
+        self.console.print(
+            Panel(summary_text, title="[bold green]Ingestion Complete[/]", expand=False)
+        )
 
         # Show embedding usage statistics
-        if hasattr(embedding_generator, 'get_usage_summary'):
+        if hasattr(embedding_generator, "get_usage_summary"):
             usage_summary = embedding_generator.get_usage_summary()
             self._show_embedding_usage_summary(usage_summary)
 
     def _show_embedding_usage_summary(self, usage_summary: Dict[str, Any]) -> None:
         """Show embedding usage summary.
-        
+
         Args:
             usage_summary: Usage summary from embedding generator
         """
         if not usage_summary or usage_summary.get("total_requests", 0) == 0:
             return
-            
+
         # Create usage table
-        usage_table = Table(title="Embedding Usage Summary", show_header=True, header_style="bold blue")
+        usage_table = Table(
+            title="Embedding Usage Summary", show_header=True, header_style="bold blue"
+        )
         usage_table.add_column("Metric", style="cyan")
         usage_table.add_column("Value", justify="right", style="green")
-        
-        usage_table.add_row("Total tokens processed", f"{usage_summary.get('total_tokens', 0):,}")
-        usage_table.add_row("Total API requests", str(usage_summary.get('total_requests', 0)))
-        usage_table.add_row("Average tokens per request", f"{usage_summary.get('average_tokens_per_request', 0):.0f}")
-        
-        total_cost = usage_summary.get('total_cost', 0.0)
+
+        usage_table.add_row(
+            "Total tokens processed", f"{usage_summary.get('total_tokens', 0):,}"
+        )
+        usage_table.add_row(
+            "Total API requests", str(usage_summary.get("total_requests", 0))
+        )
+        usage_table.add_row(
+            "Average tokens per request",
+            f"{usage_summary.get('average_tokens_per_request', 0):.0f}",
+        )
+
+        total_cost = usage_summary.get("total_cost", 0.0)
         if total_cost > 0:
             usage_table.add_row("Total cost", f"${total_cost:.4f}")
             # Add cost breakdown if significant
             if total_cost > 0.01:
                 usage_table.add_row("", "")  # Spacing
                 usage_table.add_row("[bold]Cost breakdown:", "")
-                usage_table.add_row("  Per 1K tokens", f"${total_cost * 1000 / max(1, usage_summary.get('total_tokens', 1)):.5f}")
+                usage_table.add_row(
+                    "  Per 1K tokens",
+                    f"${total_cost * 1000 / max(1, usage_summary.get('total_tokens', 1)):.5f}",
+                )
         else:
             usage_table.add_row("Total cost", "$0.00 (local model)")
-        
+
         self.console.print(usage_table)
 
     def _resolve_persist_directory(
