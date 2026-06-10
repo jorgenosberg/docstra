@@ -1,66 +1,93 @@
-[tool.poetry]
+[project]
 name = "docstra"
 version = "0.1.15"
 description = "LLM-powered code documentation assistant"
-authors = ["Jørgen Andresen Osberg <jorgenao@uio.no>", "Jonathan Selstad Hofstein <jonatsho@uio.no>"]
 readme = "README.md"
-license = "MIT"
-repository = "https://github.com/docstra-dev/docstra"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "Jørgen Andresen Osberg", email = "jorgenao@uio.no" },
+    { name = "Jonathan Selstad Hofstein", email = "jonatsho@uio.no" },
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "anthropic>=0.49.0,<0.50",
+    "chromadb>=0.6.3,<0.7",
+    "einops>=0.8.1,<0.9",
+    "fastapi>=0.115.12,<0.116",
+    "jinaai>=0.2.10,<0.3",
+    "jinja2>=3.1.6,<4",
+    "langchain>=0.3.21,<0.4",
+    "langchain-community>=0.3.20,<0.4",
+    "langchain-core>=0.3.61,<0.4",
+    "langchain-huggingface>=0.1.2,<0.2",
+    "langchain-ollama>=0.3.0,<0.4",
+    "langchain-openai>=0.3.11,<0.4",
+    "markdown>=3.8,<4",
+    "mkdocs>=1.6.1,<2",
+    "mkdocs-material>=9.6.11,<10",
+    "mkdocstrings>=0.29.1,<0.30",
+    "openai>=1.68.2,<2",
+    "pydantic>=2.10.6,<3",
+    "python-dotenv>=1.0.0,<2",
+    "python-multipart>=0.0.20,<1",
+    "pyyaml>=6.0.2,<7",
+    "requests>=2.32.3,<3",
+    "rich>=13.9.4,<14",
+    "sentence-transformers>=4.0.1,<5",
+    "tenacity>=9.1.2,<10",
+    "tiktoken>=0.9.0,<1",
+    "torch>=2.6.0,<3",
+    "transformers>=4.50.1,<5",
+    "tree-sitter>=0.24.0,<0.25",
+    "tree-sitter-language-pack>=0.6.1,<0.7",
+    "typer>=0.15.4,<0.16",
+    "uvicorn>=0.34.2,<0.35",
+]
+
+[project.urls]
+Repository = "https://github.com/jorgenosberg/docstra"
+
+[project.scripts]
+docstra = "docstra.core.cli:app"
+
+[dependency-groups]
+dev = [
+    "furo>=2024.8.6,<2025.0",
+    "pip-audit>=2.10.0",
+    "pre-commit>=4.2.0,<5",
+    "pytest>=8.3.5,<9",
+    "pytest-cov>=6.0.0,<7",
+    "ruff>=0.15.16,<0.16",
+    "sphinx>=8.2.3,<9",
+    "ty>=0.0.47",
 ]
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["uv_build>=0.11.19,<0.12"]
+build-backend = "uv_build"
 
-[tool.poetry.dependencies]
-python = ">=3.11,<4.0"
-pydantic = "^2.10.6"
-chromadb = "^0.6.3"
-transformers = "^4.50.1"
-sentence-transformers = "^4.0.1"
-langchain = "^0.3.21"
-langchain-community = "^0.3.20"
-tree-sitter = "^0.24.0"
-typer = "^0.15.4"
-anthropic = "^0.49.0"
-openai = "^1.68.2"
-python-dotenv = "^1.0.0"
-mkdocs = "^1.6.1"
-tree-sitter-language-pack = "^0.6.1"
-langchain-huggingface = "^0.1.2"
-langchain-ollama = "^0.3.0"
-langchain-openai = "^0.3.11"
-torch = "^2.6.0"
-jinaai = "^0.2.10"
-einops = "^0.8.1"
-mkdocs-material = "^9.6.11"
-mkdocstrings = "^0.29.1"
+[tool.uv]
+index-strategy = "first-index"
+required-version = ">=0.11.19,<0.12"
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.3.5"
-pytest-cov = "^6.0.0"
-ruff = "^0.11.2"
-mypy = "^1.15.0"
-pre-commit = "^4.2.0"
-bandit = "^1.8.3"
-sphinx = "^8.2.3"
-furo = "^2024.8.6"
-
-[tool.poetry.scripts]
-docstra = "docstra.core.cli:app"
+# Keep this project on PyPI by default. If a non-PyPI source is ever needed,
+# pin it explicitly with [tool.uv.sources] and an explicit [[tool.uv.index]].
+[tool.uv.build-backend]
+module-root = ""
 
 [tool.ruff]
 line-length = 88
-target-version = "py311"
+target-version = "py312"
 
-[tool.mypy]
-python_version = "3.11"
+[tool.ty]
+python-version = "3.12"
+
+[tool.ty.src]
+include = ["docstra", "scripts"]
