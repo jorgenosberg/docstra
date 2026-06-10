@@ -6,9 +6,10 @@ Command-line interface for the code documentation assistant.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
-from typing import List, Optional, Union, Dict, Any, cast
+from typing import List, Optional, Union, Dict, Any, Callable, cast
 
 import typer
 from rich.console import Console
@@ -48,6 +49,13 @@ from docstra.core.llm.anthropic import AnthropicClient
 from docstra.core.llm.local import LocalModelClient
 from docstra.core.llm.ollama import OllamaClient
 from docstra.core.llm.openai import OpenAIClient
+from docstra.core.retrieval.chroma import ChromaRetriever
+from docstra.core.retrieval.evaluation import (
+    DEFAULT_RETRIEVAL_EVAL_CASES,
+    RetrievalEvalSummary,
+    evaluate_retrieval_cases,
+)
+from docstra.core.retrieval.hybrid import HybridRetriever
 from docstra.core.services.initialization_service import InitializationService
 from docstra.core.services.ingestion_service import IngestionService
 from docstra.core.services.query_service import QueryService
@@ -60,6 +68,10 @@ from urllib.parse import quote
 import re
 from pathlib import Path
 from docstra.core.utils.colors import Colors
+
+RETRIEVAL_EVAL_CANDIDATE_MULTIPLIER = 5
+RETRIEVAL_EVAL_MIN_CANDIDATES = 50
+
 
 def display_docstra_header() -> None:
     """Display the DOCSTRA ASCII art header with subtle styling."""
@@ -1495,6 +1507,138 @@ def postprocess_llm_output_with_links(answer: str, sources: list) -> str:
     # Replace file references in the answer
     processed = file_ref_pattern.sub(replacer, answer)
     return processed
+
+
+def _get_persist_paths(
+    user_config: UserConfig, abs_codebase_path: Path
+) -> tuple[Path, Path, Path]:
+    persist_directory_name = user_config.storage.persist_directory
+    if not Path(persist_directory_name).is_absolute():
+        effective_persist_dir = abs_codebase_path / persist_directory_name
+    else:
+        effective_persist_dir = Path(persist_directory_name)
+
+    effective_persist_dir = effective_persist_dir.resolve()
+    chroma_path = effective_persist_dir / "chroma"
+    index_path = effective_persist_dir / "index"
+    return effective_persist_dir, chroma_path, index_path
+
+
+def _create_retrieval_eval_runner(
+    user_config: UserConfig, abs_codebase_path: Path
+) -> Callable[[str, int], List[Dict[str, Any]]]:
+    _, chroma_path, index_path = _get_persist_paths(user_config, abs_codebase_path)
+    chroma_check_file = chroma_path / "chroma.sqlite3"
+
+    if not index_path.exists() or not chroma_check_file.exists():
+        raise FileNotFoundError(
+            f"Codebase at {abs_codebase_path} is not fully initialized for "
+            f"retrieval evaluation. ChromaDB path: {chroma_path} "
+            f"(check file: {chroma_check_file}, exists: "
+            f"{chroma_check_file.exists()}), index path: {index_path} "
+            f"(exists: {index_path.exists()}). Run 'docstra init' and "
+            "'docstra ingest' first."
+        )
+
+    embedding_generator = EmbeddingFactory.create_embedding_generator(
+        embedding_type=user_config.embedding.provider,
+        model_name=user_config.embedding.model_name,
+    )
+    storage = ChromaDBStorage(persist_directory=str(chroma_path))
+    base_retriever = ChromaRetriever(storage, embedding_generator)
+    code_indexer = CodebaseIndexer(index_directory=str(index_path))
+    code_index = code_indexer.get_index()
+
+    if code_index:
+        hybrid_retriever = HybridRetriever(base_retriever, code_index)
+
+        def retrieve(question: str, top_k: int) -> List[Dict[str, Any]]:
+            return hybrid_retriever.retrieve(question, n_results=top_k)
+
+        return retrieve
+
+    def retrieve(question: str, top_k: int) -> List[Dict[str, Any]]:
+        return base_retriever.retrieve_chunks(question, n_results=top_k)
+
+    return retrieve
+
+
+def _print_retrieval_eval_summary(summary: RetrievalEvalSummary) -> None:
+    table = Table(
+        title=f"Retrieval Eval Results (recall@{summary.top_k})",
+        show_header=True,
+        header_style=Colors.HIGHLIGHT_BOLD,
+    )
+    table.add_column("#", justify="right")
+    table.add_column("Question", overflow="fold")
+    table.add_column("Expected", overflow="fold")
+    table.add_column("Match", overflow="fold")
+    table.add_column("Rank", justify="right")
+    table.add_column("Result")
+
+    for index, result in enumerate(summary.results, start=1):
+        table.add_row(
+            str(index),
+            result.case.question,
+            ", ".join(result.case.expected_files),
+            result.matched_file or "-",
+            str(result.rank) if result.rank is not None else "-",
+            "pass" if result.passed else "fail",
+            style=Colors.SUCCESS if result.passed else Colors.ERROR,
+        )
+
+    console.print(table)
+    console.print(
+        f"[{Colors.BOLD}]Recall@{summary.top_k}:[/] "
+        f"{summary.passed_count}/{summary.total} "
+        f"({summary.recall_at_k:.1%})"
+    )
+
+
+@app.command("eval-retrieval")
+def eval_retrieval(
+    codebase_path: str = typer.Option(
+        ".", "--codebase", "-C", help="Path to the codebase"
+    ),
+    config_path: Optional[str] = typer.Option(
+        None, "--config", "-c", help="Path to the configuration file"
+    ),
+    top_k: int = typer.Option(
+        10, "--top-k", min=1, help="Number of unique source files to evaluate"
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Print machine-readable JSON output"
+    ),
+) -> None:
+    """Evaluate retrieval against Docstra's built-in source-file checks."""
+    user_config = load_or_init_config(config_path)
+    abs_codebase_path = Path(codebase_path).resolve()
+
+    try:
+        retrieve = _create_retrieval_eval_runner(user_config, abs_codebase_path)
+        candidate_k = max(
+            top_k * RETRIEVAL_EVAL_CANDIDATE_MULTIPLIER,
+            RETRIEVAL_EVAL_MIN_CANDIDATES,
+        )
+        summary = evaluate_retrieval_cases(
+            cases=DEFAULT_RETRIEVAL_EVAL_CASES,
+            retrieve=retrieve,
+            top_k=top_k,
+            candidate_k=candidate_k,
+            codebase_path=abs_codebase_path,
+        )
+    except FileNotFoundError as exc:
+        console.print(f"[{Colors.ERROR_BOLD}]Error:[/] {exc}")
+        raise typer.Exit(code=1) from exc
+    except Exception as exc:
+        console.print(f"[{Colors.ERROR_BOLD}]Error during retrieval eval:[/] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    if json_output:
+        console.print(json.dumps(summary.to_dict(), indent=2))
+        return
+
+    _print_retrieval_eval_summary(summary)
 
 
 # Add query command - refactored from ask
