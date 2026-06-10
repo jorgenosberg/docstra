@@ -56,13 +56,15 @@ class InitializationService:
             return False
 
         if run_wizard:
-            self.console.print(Panel("Project Configuration Wizard", style="bold blue", expand=False))
+            self.console.print(
+                Panel("Project Configuration Wizard", style="bold blue", expand=False)
+            )
             try:
                 # Call run_init_wizard with correct arguments
                 run_init_wizard(
                     self.console,
                     str(abs_codebase_path),  # local_path
-                    config_file_path,        # config_path
+                    config_file_path,  # config_path
                 )
                 # Wizard saves the config, so we reload it to get the latest
                 # No need to call load_config as ConfigManager's constructor handles loading
@@ -84,13 +86,9 @@ class InitializationService:
             # If not running wizard, ensure config is loaded or default is created and saved
             if not Path(config_manager.config_path).exists():
                 config_manager.save()  # Using the renamed method
-                self.console.print(
-                    f"[dim]✓ Default configuration created[/]"
-                )
+                self.console.print("[dim]✓ Default configuration created[/]")
             else:
-                self.console.print(
-                    f"[dim]✓ Using existing configuration[/]"
-                )
+                self.console.print("[dim]✓ Using existing configuration[/]")
 
         # Determine persist_directory from loaded config
         # ConfigManager.config should now be populated
@@ -117,35 +115,50 @@ class InitializationService:
 
         # Define and write .docstraignore file within the persist_directory
         docstraignore_path = persist_directory / ".docstraignore"
-        
+
         # Use intelligent language detection to generate appropriate ignore patterns
-        with self.console.status("[cyan]🔍 Analyzing codebase structure...", spinner="dots"):
+        with self.console.status(
+            "[cyan]🔍 Analyzing codebase structure...", spinner="dots"
+        ):
             detector = LanguageDetector(str(abs_codebase_path))
             detection_summary = detector.get_detection_summary()
             intelligent_patterns = detector.generate_ignore_patterns()
-        
+
         # Show detection results to user in a clean format
-        self.console.print(f"[dim]📊 Codebase Analysis:[/]")
-        self.console.print(f"   • [green]Primary language:[/] {detection_summary['primary_language']}")
-        self.console.print(f"   • [green]Project type:[/] {detection_summary['codebase_type']}")
-        
-        if detection_summary['languages']:
-            lang_count = len(detection_summary['languages'])
+        self.console.print("[dim]📊 Codebase Analysis:[/]")
+        self.console.print(
+            f"   • [green]Primary language:[/] {detection_summary['primary_language']}"
+        )
+        self.console.print(
+            f"   • [green]Project type:[/] {detection_summary['codebase_type']}"
+        )
+
+        if detection_summary["languages"]:
+            lang_count = len(detection_summary["languages"])
             if lang_count <= 3:
-                languages_str = ", ".join([f"{lang} ({count})" for lang, count in detection_summary['languages'].items()])
+                languages_str = ", ".join(
+                    [
+                        f"{lang} ({count})"
+                        for lang, count in detection_summary["languages"].items()
+                    ]
+                )
                 self.console.print(f"   • [green]Languages:[/] {languages_str}")
             else:
-                total_files = sum(detection_summary['languages'].values())
-                self.console.print(f"   • [green]Languages:[/] {lang_count} languages, {total_files} files total")
-        
-        if detection_summary['frameworks']:
-            frameworks_count = len(detection_summary['frameworks'])
+                total_files = sum(detection_summary["languages"].values())
+                self.console.print(
+                    f"   • [green]Languages:[/] {lang_count} languages, {total_files} files total"
+                )
+
+        if detection_summary["frameworks"]:
+            frameworks_count = len(detection_summary["frameworks"])
             if frameworks_count <= 4:
-                frameworks_str = ", ".join(detection_summary['frameworks'])
+                frameworks_str = ", ".join(detection_summary["frameworks"])
                 self.console.print(f"   • [green]Frameworks:[/] {frameworks_str}")
             else:
-                self.console.print(f"   • [green]Frameworks:[/] {frameworks_count} frameworks detected")
-        
+                self.console.print(
+                    f"   • [green]Frameworks:[/] {frameworks_count} frameworks detected"
+                )
+
         # Merge with user-supplied patterns (if any)
         user_patterns = initial_exclude_patterns if initial_exclude_patterns else []
         # Deduplicate, preserve order: user patterns first, then intelligent patterns not already present
@@ -155,7 +168,7 @@ class InitializationService:
             if pat and pat not in seen:
                 merged_patterns.append(pat)
                 seen.add(pat)
-        
+
         ignore_content = (
             "# Patterns to exclude from ALL docstra operations\n"
             "# These patterns are applied universally before any command-specific rules.\n"
@@ -166,9 +179,7 @@ class InitializationService:
             f"# Primary language: {detection_summary['primary_language']}\n"
             f"# Detected frameworks: {', '.join(detection_summary['frameworks']) if detection_summary['frameworks'] else 'none'}\n"
             f"# Total patterns: {len(merged_patterns)}\n"
-            "#\n\n"
-            + "\n".join(merged_patterns)
-            + "\n"
+            "#\n\n" + "\n".join(merged_patterns) + "\n"
         )
         try:
             with open(docstraignore_path, "w") as f:

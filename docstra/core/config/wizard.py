@@ -377,7 +377,9 @@ class ConfigWizard:
             try:
                 value = str(field.field_type(prompt_value))
             except (ValueError, TypeError):
-                self.console.print(f"[{Colors.ERROR}]Invalid numeric value, using default.[/]")
+                self.console.print(
+                    f"[{Colors.ERROR}]Invalid numeric value, using default.[/]"
+                )
                 value = str(default)
         else:
             # For string fields and others
@@ -396,22 +398,36 @@ class ConfigWizard:
                 valid, message = result
             else:
                 valid, message = bool(result), ""
-            
+
             if not valid:
-                self.console.print(f"[{Colors.ERROR_BOLD}]Validation failed: {message}[/]")
-                
+                self.console.print(
+                    f"[{Colors.ERROR_BOLD}]Validation failed: {message}[/]"
+                )
+
                 # For model provider, offer alternatives
                 if field.path == "model.provider":
-                    self.console.print(f"\n[{Colors.WARNING}]Available alternatives:[/]")
-                    self.console.print(f"  - [{Colors.HIGHLIGHT}]anthropic[/] (requires API key)")
-                    self.console.print(f"  - [{Colors.HIGHLIGHT}]openai[/] (requires API key)")
-                    self.console.print(f"  - [{Colors.HIGHLIGHT}]local[/] (requires local model)")
-                    
-                    retry = Confirm.ask("Would you like to choose a different provider?", default=True)
+                    self.console.print(
+                        f"\n[{Colors.WARNING}]Available alternatives:[/]"
+                    )
+                    self.console.print(
+                        f"  - [{Colors.HIGHLIGHT}]anthropic[/] (requires API key)"
+                    )
+                    self.console.print(
+                        f"  - [{Colors.HIGHLIGHT}]openai[/] (requires API key)"
+                    )
+                    self.console.print(
+                        f"  - [{Colors.HIGHLIGHT}]local[/] (requires local model)"
+                    )
+
+                    retry = Confirm.ask(
+                        "Would you like to choose a different provider?", default=True
+                    )
                     if retry:
                         return self._prompt_for_field(field, scope)
-                
-                self.console.print(f"[{Colors.WARNING}]Using default value: {default}[/]")
+
+                self.console.print(
+                    f"[{Colors.WARNING}]Using default value: {default}[/]"
+                )
                 value = str(default)
             else:
                 # Show validation message (could be success or warning)
@@ -532,7 +548,9 @@ class ConfigWizard:
                     if 0 <= idx < len(available_fields)
                 ]
             except (ValueError, IndexError):
-                self.console.print(f"[{Colors.ERROR}]Invalid selection, please try again.[/]")
+                self.console.print(
+                    f"[{Colors.ERROR}]Invalid selection, please try again.[/]"
+                )
                 return self._select_fields_to_configure(all_fields, scope, advanced)
 
     def run_config_wizard(
@@ -567,7 +585,9 @@ class ConfigWizard:
             )
 
         if not fields_to_configure:
-            self.console.print(f"[{Colors.WARNING}]No fields selected for configuration.[/]")
+            self.console.print(
+                f"[{Colors.WARNING}]No fields selected for configuration.[/]"
+            )
             return
 
         # Configure global settings
@@ -615,7 +635,9 @@ class ConfigWizard:
         self.console.print(Panel("Project Initialization Wizard", expand=False))
 
         if not self.local_config_manager:
-            self.console.print(f"[{Colors.ERROR}]No local project specified, cannot initialize.[/]")
+            self.console.print(
+                f"[{Colors.ERROR}]No local project specified, cannot initialize.[/]"
+            )
             return
 
         # Explain the wizard
@@ -664,8 +686,10 @@ class ConfigWizard:
 
         # Save the local configuration
         self.local_config_manager.save()
-        
-        self.console.print(f"[{Colors.SUCCESS_BOLD}]Project initialized successfully![/]")
+
+        self.console.print(
+            f"[{Colors.SUCCESS_BOLD}]Project initialized successfully![/]"
+        )
         self.console.print(
             f"Local configuration saved to: [{Colors.HIGHLIGHT}]{self.local_config_manager.config_path}[/]"
         )
@@ -721,24 +745,25 @@ def run_init_wizard(
 
 def validate_model_provider(provider: str) -> Tuple[bool, str]:
     """Validate that the selected model provider is available.
-    
+
     Args:
         provider: The model provider to validate
-        
+
     Returns:
         Tuple of (is_valid, message)
     """
     from docstra.core.config.settings import ModelProvider
-    
+
     try:
         provider_enum = ModelProvider(provider.lower())
     except ValueError:
         return False, f"Invalid provider: {provider}"
-    
+
     if provider_enum == ModelProvider.OLLAMA:
         # Check if Ollama is available, but don't fail hard
         try:
             from docstra.core.llm.ollama import OllamaClient
+
             client = OllamaClient(validate_connection=True)
             if client.connected:
                 return True, "Ollama is available and ready"
@@ -754,6 +779,6 @@ def validate_model_provider(provider: str) -> Tuple[bool, str]:
                 f"Warning: Could not verify Ollama connection: {e}. "
                 "Ensure Ollama is installed and running before using docstra commands"
             )
-    
+
     # For other providers, we assume they're valid (API keys will be validated later)
     return True, f"{provider_enum.value} provider selected"

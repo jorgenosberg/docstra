@@ -5,12 +5,12 @@ This module contains sophisticated prompt templates designed to generate high-qu
 documentation using LLMs with rich contextual information.
 """
 
-from typing import Dict, Any, Optional
+from typing import Optional
 
 
 class EnhancedDocumentationPrompts:
     """Enhanced prompt templates for different documentation types with rich context integration."""
-    
+
     # Project overview prompt with comprehensive context
     PROJECT_OVERVIEW_PROMPT = """You are an expert technical writer creating comprehensive project documentation.
 
@@ -266,45 +266,45 @@ Generate a comprehensive API overview that includes:
         """Format the project overview prompt with provided context."""
         # Provide defaults for optional parameters
         defaults = {
-            'total_lines': 0,
-            'repo_structure': 'Not available',
-            'module_overview': 'Not available', 
-            'statistics': 'Not available',
-            'repository_context': 'Not available',
-            'style_instructions': ''
+            "total_lines": 0,
+            "repo_structure": "Not available",
+            "module_overview": "Not available",
+            "statistics": "Not available",
+            "repository_context": "Not available",
+            "style_instructions": "",
         }
         defaults.update(kwargs)
         return cls.PROJECT_OVERVIEW_PROMPT.format(**defaults)
-    
+
     @classmethod
     def format_module_overview_prompt(cls, **kwargs) -> str:
         """Format the module overview prompt with provided context."""
         defaults = {
-            'module_category': 'unknown',
-            'files_list': 'No files listed',
-            'dependencies': 'None identified',
-            'related_modules': 'None identified',
-            'key_symbols': 'No symbols identified',
-            'module_context': 'Not available',
-            'style_instructions': ''
+            "module_category": "unknown",
+            "files_list": "No files listed",
+            "dependencies": "None identified",
+            "related_modules": "None identified",
+            "key_symbols": "No symbols identified",
+            "module_context": "Not available",
+            "style_instructions": "",
         }
         defaults.update(kwargs)
         return cls.MODULE_OVERVIEW_PROMPT.format(**defaults)
-    
+
     @classmethod
     def format_file_documentation_prompt(cls, **kwargs) -> str:
         """Format the file documentation prompt with provided context."""
         defaults = {
-            'module_category': 'unknown',
-            'classes': 'None',
-            'functions': 'None', 
-            'imports': 'None',
-            'file_context': 'No additional context available',
-            'related_files': 'None',
-            'dependencies': 'None',
-            'similar_examples': 'No similar examples found',
-            'cross_references': 'None',
-            'style_instructions': ''
+            "module_category": "unknown",
+            "classes": "None",
+            "functions": "None",
+            "imports": "None",
+            "file_context": "No additional context available",
+            "related_files": "None",
+            "dependencies": "None",
+            "similar_examples": "No similar examples found",
+            "cross_references": "None",
+            "style_instructions": "",
         }
         defaults.update(kwargs)
         return cls.FILE_DOCUMENTATION_PROMPT.format(**defaults)
@@ -313,10 +313,10 @@ Generate a comprehensive API overview that includes:
     def format_user_guide_prompt(cls, **kwargs) -> str:
         """Format the user guide prompt with provided context."""
         defaults = {
-            'guide_type': 'user guide',
-            'repository_context': 'Not available',
-            'target_audience': 'developers',
-            'style_instructions': ''
+            "guide_type": "user guide",
+            "repository_context": "Not available",
+            "target_audience": "developers",
+            "style_instructions": "",
         }
         defaults.update(kwargs)
         return cls.USER_GUIDE_PROMPT.format(**defaults)
@@ -325,11 +325,11 @@ Generate a comprehensive API overview that includes:
     def format_api_documentation_prompt(cls, **kwargs) -> str:
         """Format the API documentation prompt with provided context."""
         defaults = {
-            'api_files_count': 0,
-            'public_classes': 'None identified',
-            'public_functions': 'None identified',
-            'api_context': 'Not available',
-            'style_instructions': ''
+            "api_files_count": 0,
+            "public_classes": "None identified",
+            "public_functions": "None identified",
+            "api_context": "Not available",
+            "style_instructions": "",
         }
         defaults.update(kwargs)
         return cls.API_DOCUMENTATION_PROMPT.format(**defaults)
@@ -337,90 +337,102 @@ Generate a comprehensive API overview that includes:
 
 class PromptFormatters:
     """Utility functions for formatting context information for prompts."""
-    
+
     @staticmethod
     def format_file_list(files: list, max_files: int = 10) -> str:
         """Format a list of files for inclusion in prompts."""
         if not files:
             return "No files found"
-        
+
         formatted = []
         for i, file in enumerate(files[:max_files]):
-            if hasattr(file, 'metadata'):
+            if hasattr(file, "metadata"):
                 # Document object
-                formatted.append(f"- **{file.metadata.filepath}** ({file.metadata.line_count} lines)")
+                formatted.append(
+                    f"- **{file.metadata.filepath}** ({file.metadata.line_count} lines)"
+                )
             elif isinstance(file, dict):
                 # Dictionary with file info
-                formatted.append(f"- **{file.get('path', 'unknown')}** ({file.get('lines', '?')} lines)")
+                formatted.append(
+                    f"- **{file.get('path', 'unknown')}** ({file.get('lines', '?')} lines)"
+                )
             else:
                 # String path
                 formatted.append(f"- **{file}**")
-        
+
         if len(files) > max_files:
             formatted.append(f"- ... and {len(files) - max_files} more files")
-        
+
         return "\n".join(formatted)
-    
+
     @staticmethod
     def format_dependencies(dependencies: list, max_deps: int = 8) -> str:
         """Format a list of dependencies for inclusion in prompts."""
         if not dependencies:
             return "None identified"
-        
+
         formatted = [f"- {dep}" for dep in dependencies[:max_deps]]
         if len(dependencies) > max_deps:
-            formatted.append(f"- ... and {len(dependencies) - max_deps} more dependencies")
-        
+            formatted.append(
+                f"- ... and {len(dependencies) - max_deps} more dependencies"
+            )
+
         return "\n".join(formatted)
-    
+
     @staticmethod
-    def format_symbols(symbols: list, symbol_type: str = "symbols", max_symbols: int = 10) -> str:
+    def format_symbols(
+        symbols: list, symbol_type: str = "symbols", max_symbols: int = 10
+    ) -> str:
         """Format a list of symbols (classes, functions, etc.) for inclusion in prompts."""
         if not symbols:
             return f"No {symbol_type} found"
-        
+
         if len(symbols) <= max_symbols:
             return f"{', '.join(symbols)}"
         else:
             return f"{', '.join(symbols[:max_symbols])}, and {len(symbols) - max_symbols} more"
-    
+
     @staticmethod
     def format_similar_examples(examples: list, max_examples: int = 3) -> str:
         """Format similar code examples for inclusion in prompts."""
         if not examples:
             return "No similar examples found"
-        
+
         formatted = []
         for example in examples[:max_examples]:
             if isinstance(example, dict):
-                filepath = example.get('filepath', 'unknown')
-                content = example.get('content', '')[:200]  # Limit content length
-                relevance = example.get('relevance', 'unknown')
-                formatted.append(f"**{filepath}** (relevance: {relevance}):\n```\n{content}...\n```")
+                filepath = example.get("filepath", "unknown")
+                content = example.get("content", "")[:200]  # Limit content length
+                relevance = example.get("relevance", "unknown")
+                formatted.append(
+                    f"**{filepath}** (relevance: {relevance}):\n```\n{content}...\n```"
+                )
             else:
                 formatted.append(str(example))
-        
+
         return "\n\n".join(formatted)
-    
+
     @staticmethod
     def format_cross_references(cross_refs: list, max_refs: int = 5) -> str:
         """Format cross-references for inclusion in prompts."""
         if not cross_refs:
             return "None identified"
-        
+
         formatted = []
         for ref in cross_refs[:max_refs]:
             if isinstance(ref, dict):
-                ref_type = ref.get('type', 'reference')
-                filepath = ref.get('filepath', 'unknown')
-                context = ref.get('context', '')[:100]  # Limit context length
-                formatted.append(f"- **{ref_type.title()}** in {filepath}: {context}...")
+                ref_type = ref.get("type", "reference")
+                filepath = ref.get("filepath", "unknown")
+                context = ref.get("context", "")[:100]  # Limit context length
+                formatted.append(
+                    f"- **{ref_type.title()}** in {filepath}: {context}..."
+                )
             else:
                 formatted.append(f"- {ref}")
-        
+
         if len(cross_refs) > max_refs:
             formatted.append(f"- ... and {len(cross_refs) - max_refs} more references")
-        
+
         return "\n".join(formatted)
 
     @staticmethod
@@ -437,4 +449,4 @@ class PromptFormatters:
 """
         if style_guide:
             return base_style + f"\n## Custom Style Guide\n{style_guide}"
-        return base_style 
+        return base_style
