@@ -145,7 +145,7 @@ def main() -> int:
 
         if args.check_only:
             print("\nTo install, run:")
-            print(f"  pip install {' '.join(missing_deps)}")
+            print("  uv sync")
             return 1
 
         # Install dependencies

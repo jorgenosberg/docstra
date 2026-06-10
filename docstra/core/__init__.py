@@ -4,7 +4,9 @@
 docstra: LLM-powered code documentation assistant.
 """
 
-__version__ = "0.1.0"
+from collections.abc import Generator
+
+from docstra import __version__ as __version__
 
 from docstra.core.config.settings import (
     ConfigManager,
@@ -138,10 +140,12 @@ class docstraant:
         else:
             raise ValueError(f"Unsupported model provider: {provider}")
 
-        # Add custom templates if defined
-        if self.config.custom_templates:
-            for name, template in self.config.custom_templates.items():
-                self.llm_client.add_template(name, template)
+    def _require_text_response(self, response: str | Generator[str, None, None]) -> str:
+        """Reject streaming responses in the high-level helper interface."""
+        if isinstance(response, str):
+            return response
+
+        raise TypeError("Streaming responses are not supported in this interface")
 
     def process_file(self, filepath: str) -> Document:
         """Process a file and prepare it for documentation.
@@ -194,8 +198,10 @@ class docstraant:
         Returns:
             Generated documentation
         """
-        return self.llm_client.document_code(
-            code=code, language=language, additional_context=additional_context
+        return self._require_text_response(
+            self.llm_client.document_code(
+                code=code, language=language, additional_context=additional_context
+            )
         )
 
     def explain_code(
@@ -211,8 +217,10 @@ class docstraant:
         Returns:
             Generated explanation
         """
-        return self.llm_client.explain_code(
-            code=code, language=language, additional_context=additional_context
+        return self._require_text_response(
+            self.llm_client.explain_code(
+                code=code, language=language, additional_context=additional_context
+            )
         )
 
     def document_file(self, filepath: str) -> str:
@@ -269,7 +277,9 @@ class docstraant:
         )
 
         # Generate answer
-        return self.llm_client.answer_question(question=question, context=results)
+        return self._require_text_response(
+            self.llm_client.answer_question(question=question, context=results)
+        )
 
     def generate_examples(self, request: str, language: str) -> str:
         """Generate code examples.
@@ -281,4 +291,6 @@ class docstraant:
         Returns:
             Generated examples
         """
-        return self.llm_client.generate_examples(request=request, language=language)
+        return self._require_text_response(
+            self.llm_client.generate_examples(request=request, language=language)
+        )

@@ -64,4 +64,6 @@ async def generate_docs(
 @app.get("/documentation", response_class=HTMLResponse)
 async def documentation_ui(request: Request):
     """Documentation generation UI."""
-    return templates.TemplateResponse("documentation.html", {"request": request})
+    return templates.TemplateResponse(
+        request, "documentation.html", {"request": request}
+    )

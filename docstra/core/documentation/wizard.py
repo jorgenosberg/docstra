@@ -41,47 +41,51 @@ class DocumentationWizard:
 
     def run(self) -> None:
         """Run the interactive wizard."""
-        self.console.print(Panel(
-            f"[{Colors.BOLD}]📚 Documentation Generation Wizard[/]", 
-            style=Colors.INFO_BOLD, 
-            expand=False
-        ))
-        self.console.print(f"[{Colors.DIM}]Let's configure your documentation settings for a comprehensive codebase guide.[/]\n")
+        self.console.print(
+            Panel(
+                f"[{Colors.BOLD}]📚 Documentation Generation Wizard[/]",
+                style=Colors.INFO_BOLD,
+                expand=False,
+            )
+        )
+        self.console.print(
+            f"[{Colors.DIM}]Let's configure your documentation settings for a comprehensive codebase guide.[/]\n"
+        )
 
         # Project information section
         self.console.print(f"[{Colors.BOLD}]📋 Project Information[/]")
         self.console.print("─" * 40)
-        
+
         self._prompt_project_field(
             "project_name",
             "📝 Project Name",
             "The display name for your documentation site",
-            self.config.get("project_name", "")
+            self.config.get("project_name", ""),
         )
 
         self._prompt_project_field(
-            "project_description", 
+            "project_description",
             "📄 Project Description",
             "A brief description of what your project does",
-            self.config.get("project_description", "")
+            self.config.get("project_description", ""),
         )
 
         self._prompt_project_field(
             "project_version",
-            "🏷️  Project Version", 
+            "🏷️  Project Version",
             "Current version of your project (semantic versioning recommended)",
-            self.config.get("project_version", "0.1.0")
+            self.config.get("project_version", "0.1.0"),
         )
 
         # Output configuration section
         self.console.print(f"\n[{Colors.BOLD}]⚙️  Output Configuration[/]")
         self.console.print("─" * 40)
-        
+
         self._prompt_project_field(
             "output_dir",
             "📁 Output Directory",
             "Directory where documentation will be generated",
-            self.config.get("output_dir", "./docs")
+            self.config.get("output_dir", "./docs"),
         )
 
         formats = ["html", "markdown", "rst"]
@@ -93,7 +97,9 @@ class DocumentationWizard:
                 break
 
         self.console.print(f"\n[{Colors.HIGHLIGHT}]📄 Output Format[/]")
-        self.console.print(f"[{Colors.DIM}]Choose the output format for your documentation[/]")
+        self.console.print(
+            f"[{Colors.DIM}]Choose the output format for your documentation[/]"
+        )
         format_choice = Prompt.ask(
             "Select format", choices=formats, default=formats[format_idx]
         )
@@ -113,26 +119,46 @@ class DocumentationWizard:
         # Summary with better formatting
         self.console.print(f"\n[{Colors.BOLD}]📊 Configuration Summary[/]")
         self.console.print("─" * 50)
-        
+
         # Create a summary table with semantic styling
         summary_table = Table(show_header=False, box=None)
         summary_table.add_column("Setting", style=Colors.HIGHLIGHT, width=20)
         summary_table.add_column("Value", style=Colors.SUCCESS)
-        
+
         # Add key settings to table
         key_settings = [
             ("📝 Project Name", self.config.get("project_name", "")),
-            ("📄 Description", self.config.get("project_description", "")[:50] + ("..." if len(str(self.config.get("project_description", ""))) > 50 else "")),
+            (
+                "📄 Description",
+                self.config.get("project_description", "")[:50]
+                + (
+                    "..."
+                    if len(str(self.config.get("project_description", ""))) > 50
+                    else ""
+                ),
+            ),
             ("🏷️  Version", self.config.get("project_version", "")),
             ("📁 Output Dir", self.config.get("output_dir", "")),
             ("📄 Format", self.config.get("format", "")),
-            ("🎯 Include Dirs", f"{len(self.config.get('include_dirs', []))} specified" if self.config.get('include_dirs') else "All directories"),
-            ("🚫 Exclude Patterns", f"{len(self.config.get('exclude_patterns', []))} patterns" if self.config.get('exclude_patterns') else "None specified"),
+            (
+                "🎯 Include Dirs",
+                f"{len(self.config.get('include_dirs', []))} specified"
+                if self.config.get("include_dirs")
+                else "All directories",
+            ),
+            (
+                "🚫 Exclude Patterns",
+                f"{len(self.config.get('exclude_patterns', []))} patterns"
+                if self.config.get("exclude_patterns")
+                else "None specified",
+            ),
         ]
-        
+
         for setting, value in key_settings:
-            summary_table.add_row(setting, str(value) if value else f"[{Colors.DIM}]Not set[/]")
-        
+            summary_table.add_row(
+                setting, str(value) if value else f"[{Colors.DIM}]Not set[/]"
+            )
+
         self.console.print(summary_table)
         self.console.print("─" * 50)
 
@@ -140,13 +166,17 @@ class DocumentationWizard:
         if Confirm.ask("💾 Save this configuration?", default=True):
             self._save_config()
         else:
-            self.console.print(f"[{Colors.WARNING}]⚠️  Configuration not saved - using temporary settings for this run.[/]")
+            self.console.print(
+                f"[{Colors.WARNING}]⚠️  Configuration not saved - using temporary settings for this run.[/]"
+            )
 
-    def _prompt_project_field(self, key: str, title: str, description: str, default: str) -> None:
+    def _prompt_project_field(
+        self, key: str, title: str, description: str, default: str
+    ) -> None:
         """Prompt for a project configuration field with consistent styling."""
         self.console.print(f"\n[{Colors.HIGHLIGHT}]{title}[/]")
         self.console.print(f"[{Colors.DIM}]{description}[/]")
-        
+
         value = Prompt.ask("Enter value", default=str(default) if default else "")
         self.config[key] = value
 
@@ -156,29 +186,39 @@ class DocumentationWizard:
         available_dirs = self._discover_directories()
 
         # Show information about directory handling
-        self.console.print(f"[{Colors.DIM}]ℹ️  Universal exclusions are managed in .docstra/.docstraignore[/]")
-        self.console.print(f"[{Colors.DIM}]   The following settings are specific to documentation generation.[/]\n")
+        self.console.print(
+            f"[{Colors.DIM}]ℹ️  Universal exclusions are managed in .docstra/.docstraignore[/]"
+        )
+        self.console.print(
+            f"[{Colors.DIM}]   The following settings are specific to documentation generation.[/]\n"
+        )
 
         if available_dirs:
             # Show available directories in a nice table
             dir_table = Table(title="Available Directories", show_header=True)
             dir_table.add_column("Directory", style=Colors.HIGHLIGHT)
             dir_table.add_column("Type", style=Colors.DIM)
-            
+
             # Simple heuristic to identify directory types
             for dir_name in sorted(available_dirs[:10]):  # Show first 10
                 dir_type = self._guess_directory_type(dir_name)
                 dir_table.add_row(dir_name, dir_type)
-            
+
             if len(available_dirs) > 10:
-                dir_table.add_row(f"[{Colors.DIM}]... and {len(available_dirs) - 10} more[/]", "")
-            
+                dir_table.add_row(
+                    f"[{Colors.DIM}]... and {len(available_dirs) - 10} more[/]", ""
+                )
+
             self.console.print(dir_table)
-        
+
         # Documentation-specific exclusions
-        self.console.print(f"\n[{Colors.HIGHLIGHT}]🚫 Documentation Exclude Patterns[/]")
-        self.console.print(f"[{Colors.DIM}]Additional gitignore-style patterns to exclude from documentation (e.g., 'tests/*', '*.tmp')[/]")
-        
+        self.console.print(
+            f"\n[{Colors.HIGHLIGHT}]🚫 Documentation Exclude Patterns[/]"
+        )
+        self.console.print(
+            f"[{Colors.DIM}]Additional gitignore-style patterns to exclude from documentation (e.g., 'tests/*', '*.tmp')[/]"
+        )
+
         current_excludes = self.config.get("exclude_patterns") or []
         exclude_input = Prompt.ask(
             "Exclude patterns (comma-separated)",
@@ -196,7 +236,9 @@ class DocumentationWizard:
             "🎯 Specify specific directories to include?",
             default=False,
         ):
-            self.console.print(f"[{Colors.DIM}]Leave empty to include all directories (recommended for comprehensive docs)[/]")
+            self.console.print(
+                f"[{Colors.DIM}]Leave empty to include all directories (recommended for comprehensive docs)[/]"
+            )
             current_includes = self.config.get("include_dirs") or []
             include_input = Prompt.ask(
                 "Include directories (comma-separated)",
@@ -221,29 +263,32 @@ class DocumentationWizard:
             return [
                 d
                 for d in os.listdir(self.base_path)
-                if os.path.isdir(os.path.join(self.base_path, d)) and not d.startswith('.')
+                if os.path.isdir(os.path.join(self.base_path, d))
+                and not d.startswith(".")
             ]
         except Exception as e:
-            self.console.print(f"[{Colors.ERROR_BOLD}]Error discovering directories:[/] {str(e)}")
+            self.console.print(
+                f"[{Colors.ERROR_BOLD}]Error discovering directories:[/] {str(e)}"
+            )
             return []
 
     def _guess_directory_type(self, dir_name: str) -> str:
         """Guess the type of directory based on common naming patterns."""
         dir_name_lower = dir_name.lower()
-        
-        if dir_name_lower in ['src', 'source', 'lib', 'library']:
+
+        if dir_name_lower in ["src", "source", "lib", "library"]:
             return "📦 Source Code"
-        elif dir_name_lower in ['test', 'tests', 'testing', 'spec', 'specs']:
+        elif dir_name_lower in ["test", "tests", "testing", "spec", "specs"]:
             return "🧪 Tests"
-        elif dir_name_lower in ['doc', 'docs', 'documentation']:
+        elif dir_name_lower in ["doc", "docs", "documentation"]:
             return "📚 Documentation"
-        elif dir_name_lower in ['example', 'examples', 'demo', 'demos']:
+        elif dir_name_lower in ["example", "examples", "demo", "demos"]:
             return "💡 Examples"
-        elif dir_name_lower in ['config', 'configuration', 'settings']:
+        elif dir_name_lower in ["config", "configuration", "settings"]:
             return "⚙️  Configuration"
-        elif dir_name_lower in ['build', 'dist', 'target', 'out', 'output']:
+        elif dir_name_lower in ["build", "dist", "target", "out", "output"]:
             return "🏗️  Build Output"
-        elif dir_name_lower in ['node_modules', 'vendor', 'third_party']:
+        elif dir_name_lower in ["node_modules", "vendor", "third_party"]:
             return "📦 Dependencies"
         else:
             return "📁 Directory"
@@ -300,10 +345,16 @@ class DocumentationWizard:
                         )
 
             self.config_manager.save()
-            self.console.print(f"[{Colors.SUCCESS_BOLD}]✅ Configuration saved successfully![/]")
-            self.console.print(f"[{Colors.DIM}]📍 Location: {self.config_manager.config_path}[/]")
+            self.console.print(
+                f"[{Colors.SUCCESS_BOLD}]✅ Configuration saved successfully![/]"
+            )
+            self.console.print(
+                f"[{Colors.DIM}]📍 Location: {self.config_manager.config_path}[/]"
+            )
         except Exception as e:
-            self.console.print(f"[{Colors.ERROR_BOLD}]❌ Error saving configuration:[/] {str(e)}")
+            self.console.print(
+                f"[{Colors.ERROR_BOLD}]❌ Error saving configuration:[/] {str(e)}"
+            )
             self.console.print(
                 f"[{Colors.WARNING}]⚠️  Please check your configuration file: {self.config_manager.config_path}[/]"
             )

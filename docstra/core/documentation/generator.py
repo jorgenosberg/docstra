@@ -5,14 +5,11 @@ Enhanced documentation generator for Docstra with improved LLM integration.
 """
 
 import os
-import json
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Set, Union, Tuple
+from typing import Dict, List, Any, Optional, Set, Union
 import yaml
-import datetime
 import concurrent.futures
-import uuid
 import time
 
 from rich.progress import (
@@ -28,64 +25,77 @@ from rich.panel import Panel
 from rich.console import Console
 from rich.table import Table
 
-from docstra.core.document_processing.document import Document, DocumentMetadata, DocumentType
+from docstra.core.document_processing.document import Document
 from docstra.core.indexing.repo_map import RepositoryMap
 from docstra.core.retrieval.chroma import ChromaRetriever
 from docstra.core.retrieval.hybrid import HybridRetriever
 from docstra.core.indexing.code_index import CodebaseIndex
-from docstra.core.documentation.prompts import EnhancedDocumentationPrompts, PromptFormatters
+from docstra.core.documentation.prompts import (
+    EnhancedDocumentationPrompts,
+    PromptFormatters,
+)
 from docstra.core.utils.colors import Colors
 
 
 class DocumentationProgressReporter:
     """Enhanced progress reporting for documentation generation."""
-    
+
     def __init__(self, console: Optional[Console] = None):
         self.console = console or Console()
         self.start_time = time.time()
         self.phase_times: Dict[str, float] = {}
         self.current_phase = ""
-        
+
     def start_phase(self, phase_name: str, description: str) -> None:
         """Start a new documentation generation phase."""
         if self.current_phase:
-            self.phase_times[self.current_phase] = time.time() - self.phase_times.get(self.current_phase, time.time())
-        
+            self.phase_times[self.current_phase] = time.time() - self.phase_times.get(
+                self.current_phase, time.time()
+            )
+
         self.current_phase = phase_name
         self.phase_times[phase_name] = time.time()
-        
+
         # Create a styled panel for the phase
         self.console.print()
-        self.console.print(Panel(
-            f"[{Colors.INFO_BOLD}]📋 {description}[/]",
-            style=Colors.INFO,
-            expand=False
-        ))
-    
+        self.console.print(
+            Panel(
+                f"[{Colors.INFO_BOLD}]📋 {description}[/]",
+                style=Colors.INFO,
+                expand=False,
+            )
+        )
+
     def end_phase(self) -> None:
         """End the current phase and record timing."""
         if self.current_phase:
             elapsed = time.time() - self.phase_times[self.current_phase]
             self.phase_times[self.current_phase] = elapsed
             self.console.print(f"[{Colors.DIM}]✅ Phase completed in {elapsed:.1f}s[/]")
-    
+
     def show_summary(self, total_files: int, total_modules: int) -> None:
         """Show final summary with timing information."""
         total_time = time.time() - self.start_time
-        
+
         self.console.print()
-        self.console.print(Panel(
-            f"[{Colors.SUCCESS_BOLD}]🎉 Documentation Generation Complete![/]\n\n"
-            f"📊 [{Colors.BOLD}]Statistics:[/]\n"
-            f"   • Files documented: [{Colors.HIGHLIGHT}]{total_files}[/]\n"
-            f"   • Modules processed: [{Colors.HIGHLIGHT}]{total_modules}[/]\n"
-            f"   • Total time: [{Colors.HIGHLIGHT}]{total_time:.1f}s[/]\n\n"
-            f"⏱️  [{Colors.BOLD}]Phase Timing:[/]\n" +
-            "\n".join([f"   • {phase}: [{Colors.HIGHLIGHT}]{time:.1f}s[/]" 
-                      for phase, time in self.phase_times.items()]),
-            style=Colors.SUCCESS,
-            expand=False
-        ))
+        self.console.print(
+            Panel(
+                f"[{Colors.SUCCESS_BOLD}]🎉 Documentation Generation Complete![/]\n\n"
+                f"📊 [{Colors.BOLD}]Statistics:[/]\n"
+                f"   • Files documented: [{Colors.HIGHLIGHT}]{total_files}[/]\n"
+                f"   • Modules processed: [{Colors.HIGHLIGHT}]{total_modules}[/]\n"
+                f"   • Total time: [{Colors.HIGHLIGHT}]{total_time:.1f}s[/]\n\n"
+                f"⏱️  [{Colors.BOLD}]Phase Timing:[/]\n"
+                + "\n".join(
+                    [
+                        f"   • {phase}: [{Colors.HIGHLIGHT}]{time:.1f}s[/]"
+                        for phase, time in self.phase_times.items()
+                    ]
+                ),
+                style=Colors.SUCCESS,
+                expand=False,
+            )
+        )
 
 
 class DocumentationGenerator:
@@ -106,7 +116,7 @@ class DocumentationGenerator:
         style_guide: Optional[str] = None,
     ):
         """Initialize the enhanced documentation generator.
-        
+
         Args:
             llm_client: LLM client for generating documentation
             output_dir: Output directory for documentation
@@ -138,17 +148,19 @@ class DocumentationGenerator:
         # Set up hybrid retriever if available
         self.hybrid_retriever = None
         if self.chroma_retriever and self.code_index:
-            self.hybrid_retriever = HybridRetriever(self.chroma_retriever, self.code_index)
+            self.hybrid_retriever = HybridRetriever(
+                self.chroma_retriever, self.code_index
+            )
 
         # Documentation state
         self.processed_documents: Dict[str, Document] = {}
         self.generated_docs: Dict[str, str] = {}
         self.cross_references: Dict[str, List[str]] = {}
         self.module_structure: Dict[str, List[Document]] = {}
-        
+
         # Context caching for performance
         self.context_cache: Dict[str, Dict[str, Any]] = {}
-        
+
         # Navigation and processed files tracking
         self.nav_items: List[Dict[str, str]] = []
         self.processed_files: Set[str] = set()
@@ -164,86 +176,104 @@ class DocumentationGenerator:
         directories = [
             self.output_dir,
             self.output_dir / "docs",
-            self.output_dir / "docs" / "modules", 
+            self.output_dir / "docs" / "modules",
             self.output_dir / "docs" / "api",
             self.output_dir / "docs" / "guides",
             self.output_dir / "docs" / "assets" / "css",
             self.output_dir / "docs" / "assets" / "js",
         ]
-        
+
         for directory in directories:
             os.makedirs(directory, exist_ok=True)
 
     def generate_documentation(
-        self, 
+        self,
         documents: List[Document],
         generate_guides: bool = True,
         generate_api_docs: bool = True,
         generate_cross_references: bool = True,
     ) -> bool:
         """Generate comprehensive documentation for a set of documents.
-        
+
         Args:
             documents: List of documents to generate documentation for
             generate_guides: Whether to generate user guides
             generate_api_docs: Whether to generate API documentation
             generate_cross_references: Whether to generate cross-reference links
-            
+
         Returns:
             True if successful, False otherwise
         """
         try:
-            self.console.print(f"[{Colors.INFO_BOLD}]🚀 Starting Enhanced Documentation Generation[/]")
-            self.console.print(f"[{Colors.DIM}]📁 {len(documents)} documents • 🏗️  {self.max_workers} workers • 🎯 {self.documentation_depth} depth[/]")
+            self.console.print(
+                f"[{Colors.INFO_BOLD}]🚀 Starting Enhanced Documentation Generation[/]"
+            )
+            self.console.print(
+                f"[{Colors.DIM}]📁 {len(documents)} documents • 🏗️  {self.max_workers} workers • 🎯 {self.documentation_depth} depth[/]"
+            )
 
             # Step 1: Analyze and organize documents
-            self.progress_reporter.start_phase("analysis", "Analyzing Codebase Structure")
+            self.progress_reporter.start_phase(
+                "analysis", "Analyzing Codebase Structure"
+            )
             self._analyze_codebase(documents)
             self.progress_reporter.end_phase()
-            
+
             # Step 2: Generate project overview
-            self.progress_reporter.start_phase("overview", "Generating Project Overview")
+            self.progress_reporter.start_phase(
+                "overview", "Generating Project Overview"
+            )
             self._generate_project_overview()
             self.progress_reporter.end_phase()
-            
+
             # Step 3: Generate module documentation
-            self.progress_reporter.start_phase("modules", "Generating Module Documentation")
+            self.progress_reporter.start_phase(
+                "modules", "Generating Module Documentation"
+            )
             self._generate_module_documentation()
             self.progress_reporter.end_phase()
-            
+
             # Step 4: Generate individual file documentation
             self.progress_reporter.start_phase("files", "Generating File Documentation")
             self._generate_file_documentation(documents)
             self.progress_reporter.end_phase()
-            
+
             # Step 5: Generate additional content
             if generate_guides:
                 self.progress_reporter.start_phase("guides", "Generating User Guides")
                 self._generate_user_guides()
                 self.progress_reporter.end_phase()
-            
+
             if generate_api_docs:
-                self.progress_reporter.start_phase("api", "Generating API Documentation")
+                self.progress_reporter.start_phase(
+                    "api", "Generating API Documentation"
+                )
                 self._generate_api_documentation()
                 self.progress_reporter.end_phase()
-            
+
             if generate_cross_references:
-                self.progress_reporter.start_phase("cross_refs", "Generating Cross-References")
+                self.progress_reporter.start_phase(
+                    "cross_refs", "Generating Cross-References"
+                )
                 self._generate_cross_references()
                 self.progress_reporter.end_phase()
-            
+
             # Step 6: Build final documentation site
             self.progress_reporter.start_phase("build", "Building Documentation Site")
             self._build_documentation_site()
             self.progress_reporter.end_phase()
-            
+
             # Show final summary
-            self.progress_reporter.show_summary(len(documents), len(self.module_structure))
-            
+            self.progress_reporter.show_summary(
+                len(documents), len(self.module_structure)
+            )
+
             return True
-            
+
         except Exception as e:
-            self.console.print(f"[{Colors.ERROR_BOLD}]Error during documentation generation: {e}[/]")
+            self.console.print(
+                f"[{Colors.ERROR_BOLD}]Error during documentation generation: {e}[/]"
+            )
             return False
 
     def _analyze_codebase(self, documents: List[Document]) -> None:
@@ -258,51 +288,59 @@ class DocumentationGenerator:
             transient=False,
         ) as progress:
             analysis_task = progress.add_task(
-                f"[{Colors.INFO}]🔍 Analyzing codebase structure...", 
-                total=len(documents)
+                f"[{Colors.INFO}]🔍 Analyzing codebase structure...",
+                total=len(documents),
             )
-            
+
             # Group documents by module/directory
             for i, doc in enumerate(documents):
                 self.processed_documents[doc.metadata.filepath] = doc
-                
+
                 # Update progress with current file
                 progress.update(
-                    analysis_task, 
+                    analysis_task,
                     advance=1,
-                    description=f"[{Colors.INFO}]🔍 Analyzing {Path(doc.metadata.filepath).name}..."
+                    description=f"[{Colors.INFO}]🔍 Analyzing {Path(doc.metadata.filepath).name}...",
                 )
-                
+
                 # Determine module category
                 if self.repo_map:
-                    module_category = self.repo_map._categorize_module(doc.metadata.filepath)
+                    module_category = self.repo_map._categorize_module(
+                        doc.metadata.filepath
+                    )
                 else:
                     # Fallback: use directory name
                     module_category = Path(doc.metadata.filepath).parent.name or "root"
-                
+
                 if module_category not in self.module_structure:
                     self.module_structure[module_category] = []
                 self.module_structure[module_category].append(doc)
-                
+
                 # Small delay for very fast operations to make progress visible
                 if len(documents) < 50:
                     time.sleep(0.01)
-        
+
         # Show analysis results
-        self.console.print(f"[{Colors.DIM}]📋 Organized into {len(self.module_structure)} modules[/]")
-        
+        self.console.print(
+            f"[{Colors.DIM}]📋 Organized into {len(self.module_structure)} modules[/]"
+        )
+
         # Show module breakdown
-        module_table = Table(title="Module Organization", show_header=True, header_style=Colors.INFO_BOLD)
+        module_table = Table(
+            title="Module Organization", show_header=True, header_style=Colors.INFO_BOLD
+        )
         module_table.add_column("Module", style=Colors.HIGHLIGHT)
         module_table.add_column("Files", justify="right", style=Colors.SUCCESS)
-        
-        for module_name, docs in sorted(self.module_structure.items(), key=lambda x: len(x[1]), reverse=True)[:10]:
+
+        for module_name, docs in sorted(
+            self.module_structure.items(), key=lambda x: len(x[1]), reverse=True
+        )[:10]:
             module_table.add_row(module_name, str(len(docs)))
-        
+
         if len(self.module_structure) > 10:
             remaining = len(self.module_structure) - 10
             module_table.add_row(f"... and {remaining} more", "")
-        
+
         self.console.print(module_table)
 
     def _generate_project_overview(self) -> None:
@@ -314,24 +352,35 @@ class DocumentationGenerator:
             transient=False,
         ) as progress:
             overview_task = progress.add_task(
-                f"[{Colors.INFO}]📄 Generating project overview...", 
-                total=None
+                f"[{Colors.INFO}]📄 Generating project overview...", total=None
             )
-            
+
             # Gather project statistics
             total_files = len(self.processed_documents)
-            total_lines = sum(doc.metadata.line_count for doc in self.processed_documents.values())
-            languages = set(str(doc.metadata.language) for doc in self.processed_documents.values())
-            
-            progress.update(overview_task, description=f"[{Colors.INFO}]📊 Analyzing project statistics...")
-            
+            total_lines = sum(
+                doc.metadata.line_count for doc in self.processed_documents.values()
+            )
+            languages = set(
+                str(doc.metadata.language) for doc in self.processed_documents.values()
+            )
+
+            progress.update(
+                overview_task,
+                description=f"[{Colors.INFO}]📊 Analyzing project statistics...",
+            )
+
             # Build module overview
             module_summaries = []
             for module_name, docs in self.module_structure.items():
-                module_summaries.append(f"- **{module_name.title()}**: {len(docs)} files")
-            
-            progress.update(overview_task, description=f"[{Colors.INFO}]🤖 Generating overview with LLM...")
-            
+                module_summaries.append(
+                    f"- **{module_name.title()}**: {len(docs)} files"
+                )
+
+            progress.update(
+                overview_task,
+                description=f"[{Colors.INFO}]🤖 Generating overview with LLM...",
+            )
+
             # Create enhanced prompt for project overview using the prompts module
             overview_prompt = EnhancedDocumentationPrompts.format_project_overview_prompt(
                 project_name=self.project_name,
@@ -339,41 +388,57 @@ class DocumentationGenerator:
                 project_path=str(self.output_dir),
                 total_files=total_files,
                 total_lines=total_lines,
-                languages=', '.join(languages),
+                languages=", ".join(languages),
                 repo_structure="\n".join(module_summaries),
                 module_overview="\n".join(module_summaries),
                 statistics=f"Files: {total_files}, Lines: {total_lines:,}, Languages: {len(languages)}",
                 repository_context=self._get_repository_context(),
-                style_instructions=PromptFormatters.get_style_instructions(self.style_guide)
+                style_instructions=PromptFormatters.get_style_instructions(
+                    self.style_guide
+                ),
             )
 
             # Generate content using LLM
             try:
                 overview_content = self.llm_client.document_code(
-                    code="",
-                    language="markdown", 
-                    additional_context=overview_prompt
+                    code="", language="markdown", additional_context=overview_prompt
                 )
-                
-                progress.update(overview_task, description=f"[{Colors.INFO}]💾 Saving project overview...")
-                
+
+                progress.update(
+                    overview_task,
+                    description=f"[{Colors.INFO}]💾 Saving project overview...",
+                )
+
                 # Save overview
                 overview_path = self.output_dir / "docs" / "index.md"
                 with open(overview_path, "w", encoding="utf-8") as f:
                     f.write(overview_content or self._get_fallback_overview())
-                
-                progress.update(overview_task, completed=True, description=f"[{Colors.SUCCESS}]✅ Project overview generated")
-                    
+
+                progress.update(
+                    overview_task,
+                    completed=True,
+                    description=f"[{Colors.SUCCESS}]✅ Project overview generated",
+                )
+
             except Exception as e:
-                progress.update(overview_task, description=f"[{Colors.WARNING}]⚠️  Using fallback overview due to error...")
-                self.console.print(f"[{Colors.WARNING}]Warning: Could not generate project overview: {e}[/]")
-                
+                progress.update(
+                    overview_task,
+                    description=f"[{Colors.WARNING}]⚠️  Using fallback overview due to error...",
+                )
+                self.console.print(
+                    f"[{Colors.WARNING}]Warning: Could not generate project overview: {e}[/]"
+                )
+
                 # Use fallback overview
                 overview_path = self.output_dir / "docs" / "index.md"
                 with open(overview_path, "w", encoding="utf-8") as f:
                     f.write(self._get_fallback_overview())
-                
-                progress.update(overview_task, completed=True, description=f"[{Colors.WARNING}]⚠️  Fallback overview saved")
+
+                progress.update(
+                    overview_task,
+                    completed=True,
+                    description=f"[{Colors.WARNING}]⚠️  Fallback overview saved",
+                )
 
     def _generate_module_documentation(self) -> None:
         """Generate documentation for each module."""
@@ -387,43 +452,51 @@ class DocumentationGenerator:
             transient=False,
         ) as progress:
             module_task = progress.add_task(
-                f"[{Colors.INFO}]📦 Generating module documentation...", 
-                total=len(self.module_structure)
+                f"[{Colors.INFO}]📦 Generating module documentation...",
+                total=len(self.module_structure),
             )
-            
+
             for module_name, documents in self.module_structure.items():
                 progress.update(
                     module_task,
-                    description=f"[{Colors.INFO}]📦 Generating docs for module '{module_name}' ({len(documents)} files)..."
+                    description=f"[{Colors.INFO}]📦 Generating docs for module '{module_name}' ({len(documents)} files)...",
                 )
                 self._generate_single_module_doc(module_name, documents)
                 progress.update(module_task, advance=1)
-        
-        self.console.print(f"[{Colors.DIM}]📦 Generated documentation for {len(self.module_structure)} modules[/]")
 
-    def _generate_single_module_doc(self, module_name: str, documents: List[Document]) -> None:
+        self.console.print(
+            f"[{Colors.DIM}]📦 Generated documentation for {len(self.module_structure)} modules[/]"
+        )
+
+    def _generate_single_module_doc(
+        self, module_name: str, documents: List[Document]
+    ) -> None:
         """Generate documentation for a single module."""
         if not documents:
             return
-        
+
         # Gather module statistics
         total_lines = sum(doc.metadata.line_count for doc in documents)
         all_classes = []
         all_functions = []
         file_list = []
-        
+
         for doc in documents:
             all_classes.extend(doc.metadata.classes)
             all_functions.extend(doc.metadata.functions)
-            file_list.append(f"- **{Path(doc.metadata.filepath).name}** ({doc.metadata.line_count} lines)")
-        
+            file_list.append(
+                f"- **{Path(doc.metadata.filepath).name}** ({doc.metadata.line_count} lines)"
+            )
+
         unique_classes = list(set(all_classes))[:10]
         unique_functions = list(set(all_functions))[:15]
-        
+
         # Get related modules and dependencies
         dependencies = self._get_module_dependencies(documents)
-        related_modules = [name for name in self.module_structure.keys() if name != module_name][:5]
-        
+        related_modules = [
+            name for name in self.module_structure.keys() if name != module_name
+        ][:5]
+
         # Create module documentation prompt using the prompts module
         module_prompt = EnhancedDocumentationPrompts.format_module_overview_prompt(
             module_name=module_name,
@@ -435,26 +508,36 @@ class DocumentationGenerator:
             related_modules=PromptFormatters.format_dependencies(related_modules),
             key_symbols=f"Classes: {', '.join(unique_classes) if unique_classes else 'None'}\nFunctions: {', '.join(unique_functions) if unique_functions else 'None'}",
             module_context=f"Part of {self.project_name} - {len(documents)} files containing core functionality",
-            style_instructions=PromptFormatters.get_style_instructions(self.style_guide)
+            style_instructions=PromptFormatters.get_style_instructions(
+                self.style_guide
+            ),
         )
 
         try:
             module_content = self.llm_client.document_code(
-                code="",
-                language="markdown",
-                additional_context=module_prompt
+                code="", language="markdown", additional_context=module_prompt
             )
-            
+
             # Save module documentation
-            module_dir = self.output_dir / "docs" / "modules" / module_name.lower().replace(" ", "_")
+            module_dir = (
+                self.output_dir
+                / "docs"
+                / "modules"
+                / module_name.lower().replace(" ", "_")
+            )
             os.makedirs(module_dir, exist_ok=True)
-            
+
             module_path = module_dir / "index.md"
             with open(module_path, "w", encoding="utf-8") as f:
-                f.write(module_content or self._get_fallback_module_doc(module_name, documents))
-                
+                f.write(
+                    module_content
+                    or self._get_fallback_module_doc(module_name, documents)
+                )
+
         except Exception as e:
-            self.console.print(f"[{Colors.WARNING}]Warning: Could not generate module documentation for {module_name}: {e}[/]")
+            self.console.print(
+                f"[{Colors.WARNING}]Warning: Could not generate module documentation for {module_name}: {e}[/]"
+            )
 
     def _generate_file_documentation(self, documents: List[Document]) -> None:
         """Generate documentation for individual files."""
@@ -469,48 +552,58 @@ class DocumentationGenerator:
             transient=False,
         ) as progress:
             file_task = progress.add_task(
-                f"[{Colors.INFO}]📄 Generating file documentation...", 
-                total=len(documents)
+                f"[{Colors.INFO}]📄 Generating file documentation...",
+                total=len(documents),
             )
-            
+
             # Process files in parallel
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=self.max_workers
+            ) as executor:
                 future_to_doc = {
                     executor.submit(self._generate_single_file_doc, doc): doc
                     for doc in documents
                 }
-                
+
                 completed_count = 0
                 failed_count = 0
-                
+
                 for future in concurrent.futures.as_completed(future_to_doc):
                     doc = future_to_doc[future]
                     try:
                         result = future.result()
                         completed_count += 1
                         progress.update(
-                            file_task, 
+                            file_task,
                             advance=1,
-                            description=f"[{Colors.INFO}]📄 Generated docs for {Path(doc.metadata.filepath).name} ({completed_count}/{len(documents)})"
+                            description=f"[{Colors.INFO}]📄 Generated docs for {Path(doc.metadata.filepath).name} ({completed_count}/{len(documents)})",
                         )
                     except Exception as e:
                         failed_count += 1
                         progress.update(
-                            file_task, 
+                            file_task,
                             advance=1,
-                            description=f"[{Colors.WARNING}]⚠️  Failed: {Path(doc.metadata.filepath).name} ({completed_count + failed_count}/{len(documents)})"
+                            description=f"[{Colors.WARNING}]⚠️  Failed: {Path(doc.metadata.filepath).name} ({completed_count + failed_count}/{len(documents)})",
                         )
-                        self.console.print(f"[{Colors.WARNING}]Warning: Failed to generate docs for {doc.metadata.filepath}: {e}[/]")
-        
+                        self.console.print(
+                            f"[{Colors.WARNING}]Warning: Failed to generate docs for {doc.metadata.filepath}: {e}[/]"
+                        )
+
         # Show completion summary
-        success_count = len(documents) - failed_count if 'failed_count' in locals() else len(documents)
-        self.console.print(f"[{Colors.DIM}]📄 File documentation: {success_count} successful, {failed_count if 'failed_count' in locals() else 0} failed[/]")
+        success_count = (
+            len(documents) - failed_count
+            if "failed_count" in locals()
+            else len(documents)
+        )
+        self.console.print(
+            f"[{Colors.DIM}]📄 File documentation: {success_count} successful, {failed_count if 'failed_count' in locals() else 0} failed[/]"
+        )
 
     def _generate_single_file_doc(self, document: Document) -> str:
         """Generate documentation for a single file."""
         # Build rich context for the file
         context = self._build_file_context(document)
-        
+
         # Create enhanced file documentation prompt using the prompts module
         file_prompt = EnhancedDocumentationPrompts.format_file_documentation_prompt(
             filepath=document.metadata.filepath,
@@ -518,107 +611,144 @@ class DocumentationGenerator:
             line_count=document.metadata.line_count,
             file_size=document.metadata.size_bytes,
             module_category=self._get_file_module_category(document),
-            classes=PromptFormatters.format_symbols(document.metadata.classes, "classes"),
-            functions=PromptFormatters.format_symbols(document.metadata.functions, "functions"),
-            imports=PromptFormatters.format_symbols(document.metadata.imports[:10], "imports"),
+            classes=PromptFormatters.format_symbols(
+                document.metadata.classes, "classes"
+            ),
+            functions=PromptFormatters.format_symbols(
+                document.metadata.functions, "functions"
+            ),
+            imports=PromptFormatters.format_symbols(
+                document.metadata.imports[:10], "imports"
+            ),
             file_context=context,
             related_files=self._get_related_files_context(document),
-            dependencies=self._get_file_dependencies_context(document), 
+            dependencies=self._get_file_dependencies_context(document),
             similar_examples=self._get_similar_examples_context(document),
             cross_references=self._get_cross_references_context(document),
             code_content=document.content,
-            style_instructions=PromptFormatters.get_style_instructions(self.style_guide)
+            style_instructions=PromptFormatters.get_style_instructions(
+                self.style_guide
+            ),
         )
 
         try:
             file_content = self.llm_client.document_code(
                 code=document.content,
                 language=str(document.metadata.language).lower(),
-                additional_context=file_prompt
+                additional_context=file_prompt,
             )
-            
+
             # Save file documentation
             rel_path = os.path.relpath(document.metadata.filepath, start=".")
             doc_path = self.output_dir / "docs" / "api" / f"{rel_path}.md"
-            
+
             os.makedirs(doc_path.parent, exist_ok=True)
-            
+
             with open(doc_path, "w", encoding="utf-8") as f:
-                f.write(file_content or f"# {Path(document.metadata.filepath).name}\n\nDocumentation generation failed.")
-            
+                f.write(
+                    file_content
+                    or f"# {Path(document.metadata.filepath).name}\n\nDocumentation generation failed."
+                )
+
             return file_content or ""
-            
-        except Exception as e:
+
+        except Exception:
             # Don't print here as it's handled in the calling method
             return ""
 
     def _build_file_context(self, document: Document) -> str:
         """Build rich context information for a file."""
         context_parts = []
-        
+
         # Add module information
         if self.repo_map:
-            module_category = self.repo_map._categorize_module(document.metadata.filepath)
+            module_category = self.repo_map._categorize_module(
+                document.metadata.filepath
+            )
             context_parts.append(f"**Module Category**: {module_category}")
-            
+
             # Get related files
             related_files = self.repo_map.get_related_files(document.metadata.filepath)
             if related_files:
-                context_parts.append(f"**Related Files**: {', '.join(related_files[:5])}")
-            
+                context_parts.append(
+                    f"**Related Files**: {', '.join(related_files[:5])}"
+                )
+
             # Get dependencies
-            dependencies = self.repo_map.get_file_dependencies(document.metadata.filepath)
+            dependencies = self.repo_map.get_file_dependencies(
+                document.metadata.filepath
+            )
             if dependencies:
                 context_parts.append(f"**Dependencies**: {', '.join(dependencies[:5])}")
-        
+
         # Add similar code examples from ChromaDB
         if self.chroma_retriever:
             similar_examples = self._get_similar_code_examples(document)
             if similar_examples:
                 examples_text = []
                 for example in similar_examples[:3]:
-                    examples_text.append(f"- {example['filepath']}: {example['content'][:100]}...")
-                context_parts.append(f"**Similar Code Examples**:\n{chr(10).join(examples_text)}")
-        
+                    examples_text.append(
+                        f"- {example['filepath']}: {example['content'][:100]}..."
+                    )
+                context_parts.append(
+                    f"**Similar Code Examples**:\n{chr(10).join(examples_text)}"
+                )
+
         # Add cross-references
         if self.hybrid_retriever:
             cross_refs = self._get_file_cross_references(document)
             if cross_refs:
-                context_parts.append(f"**Cross References**: {', '.join(cross_refs[:5])}")
-        
-        return "\n\n".join(context_parts) if context_parts else "No additional context available."
+                context_parts.append(
+                    f"**Cross References**: {', '.join(cross_refs[:5])}"
+                )
+
+        return (
+            "\n\n".join(context_parts)
+            if context_parts
+            else "No additional context available."
+        )
 
     def _get_similar_code_examples(self, document: Document) -> List[Dict[str, Any]]:
         """Get similar code examples using semantic search."""
         if not self.chroma_retriever:
             return []
-        
+
         try:
             # Create query based on file's main functionality
             query_parts = []
             if document.metadata.classes:
-                query_parts.extend([f"class {cls}" for cls in document.metadata.classes[:2]])
+                query_parts.extend(
+                    [f"class {cls}" for cls in document.metadata.classes[:2]]
+                )
             if document.metadata.functions:
-                query_parts.extend([f"function {func}" for func in document.metadata.functions[:3]])
-            
-            query = " ".join(query_parts) if query_parts else f"{document.metadata.language} implementation"
-            
+                query_parts.extend(
+                    [f"function {func}" for func in document.metadata.functions[:3]]
+                )
+
+            query = (
+                " ".join(query_parts)
+                if query_parts
+                else f"{document.metadata.language} implementation"
+            )
+
             chunks = self.chroma_retriever.retrieve_chunks(query=query, n_results=10)
-            
+
             similar_examples = []
             for chunk in chunks:
                 chunk_file = chunk.get("metadata", {}).get("document_id", "")
                 if chunk_file != document.metadata.filepath:
-                    similar_examples.append({
-                        "filepath": chunk_file,
-                        "content": chunk.get("content", "")[:200],
-                        "relevance": chunk.get("score", 0),
-                    })
+                    similar_examples.append(
+                        {
+                            "filepath": chunk_file,
+                            "content": chunk.get("content", "")[:200],
+                            "relevance": chunk.get("score", 0),
+                        }
+                    )
                     if len(similar_examples) >= 3:
                         break
-            
+
             return similar_examples
-            
+
         except Exception:
             return []
 
@@ -626,25 +756,29 @@ class DocumentationGenerator:
         """Get cross-references for a file."""
         if not self.hybrid_retriever or not self.chroma_retriever:
             return []
-        
+
         try:
             cross_refs = []
-            file_name = Path(document.metadata.filepath).stem
-            
+
             # Look for imports and usages
             for symbol in (document.metadata.classes + document.metadata.functions)[:5]:
-                chunks = self.chroma_retriever.retrieve_chunks(query=symbol, n_results=5)
+                chunks = self.chroma_retriever.retrieve_chunks(
+                    query=symbol, n_results=5
+                )
                 for chunk in chunks:
                     chunk_file = chunk.get("metadata", {}).get("document_id", "")
-                    if chunk_file != document.metadata.filepath and chunk_file not in cross_refs:
+                    if (
+                        chunk_file != document.metadata.filepath
+                        and chunk_file not in cross_refs
+                    ):
                         cross_refs.append(chunk_file)
                         if len(cross_refs) >= 5:
                             break
                 if len(cross_refs) >= 5:
                     break
-            
+
             return cross_refs
-            
+
         except Exception:
             return []
 
@@ -656,7 +790,7 @@ class DocumentationGenerator:
             ("configuration", "Configuration Guide"),
             ("troubleshooting", "Troubleshooting Guide"),
         ]
-        
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -666,18 +800,17 @@ class DocumentationGenerator:
             transient=False,
         ) as progress:
             guide_task = progress.add_task(
-                f"[{Colors.INFO}]📚 Generating user guides...", 
-                total=len(guides)
+                f"[{Colors.INFO}]📚 Generating user guides...", total=len(guides)
             )
-            
+
             for guide_name, guide_title in guides:
                 progress.update(
                     guide_task,
-                    description=f"[{Colors.INFO}]📚 Generating {guide_title}..."
+                    description=f"[{Colors.INFO}]📚 Generating {guide_title}...",
                 )
                 self._generate_single_guide(guide_name, guide_title)
                 progress.update(guide_task, advance=1)
-        
+
         self.console.print(f"[{Colors.DIM}]📚 Generated {len(guides)} user guides[/]")
 
     def _generate_single_guide(self, guide_name: str, guide_title: str) -> None:
@@ -689,22 +822,24 @@ class DocumentationGenerator:
             project_description=self.project_description,
             repository_context=self._get_repository_context(),
             target_audience="developers",
-            style_instructions=PromptFormatters.get_style_instructions(self.style_guide)
+            style_instructions=PromptFormatters.get_style_instructions(
+                self.style_guide
+            ),
         )
 
         try:
             guide_content = self.llm_client.document_code(
-                code="",
-                language="markdown",
-                additional_context=guide_prompt
+                code="", language="markdown", additional_context=guide_prompt
             )
-            
+
             guide_path = self.output_dir / "docs" / "guides" / f"{guide_name}.md"
             with open(guide_path, "w", encoding="utf-8") as f:
                 f.write(guide_content or f"# {guide_title}\n\nGuide generation failed.")
-                
+
         except Exception as e:
-            self.console.print(f"[{Colors.WARNING}]Warning: Could not generate {guide_title}: {e}[/]")
+            self.console.print(
+                f"[{Colors.WARNING}]Warning: Could not generate {guide_title}: {e}[/]"
+            )
 
     def _generate_api_documentation(self) -> None:
         """Generate API reference documentation."""
@@ -715,67 +850,96 @@ class DocumentationGenerator:
             transient=False,
         ) as progress:
             api_task = progress.add_task(
-                f"[{Colors.INFO}]🔧 Analyzing API files...", 
-                total=None
+                f"[{Colors.INFO}]🔧 Analyzing API files...", total=None
             )
-            
+
             # Group files by API relevance
             api_files = []
             for doc in self.processed_documents.values():
                 # Consider files with classes or many functions as API files
-                if (len(doc.metadata.classes) > 0 or len(doc.metadata.functions) > 3):
+                if len(doc.metadata.classes) > 0 or len(doc.metadata.functions) > 3:
                     api_files.append(doc)
-            
+
             if not api_files:
-                progress.update(api_task, completed=True, description=f"[{Colors.WARNING}]🔧 No API files found")
-                self.console.print(f"[{Colors.DIM}]🔧 No API files found (files with classes or 3+ functions)[/]")
+                progress.update(
+                    api_task,
+                    completed=True,
+                    description=f"[{Colors.WARNING}]🔧 No API files found",
+                )
+                self.console.print(
+                    f"[{Colors.DIM}]🔧 No API files found (files with classes or 3+ functions)[/]"
+                )
                 return
-            
-            progress.update(api_task, description=f"[{Colors.INFO}]🔧 Generating API overview for {len(api_files)} files...")
-            
+
+            progress.update(
+                api_task,
+                description=f"[{Colors.INFO}]🔧 Generating API overview for {len(api_files)} files...",
+            )
+
             # Generate API overview
             self._generate_api_overview(api_files)
-            
-            progress.update(api_task, completed=True, description=f"[{Colors.SUCCESS}]🔧 API documentation generated")
-        
-        self.console.print(f"[{Colors.DIM}]🔧 Generated API documentation for {len(api_files)} files[/]")
+
+            progress.update(
+                api_task,
+                completed=True,
+                description=f"[{Colors.SUCCESS}]🔧 API documentation generated",
+            )
+
+        self.console.print(
+            f"[{Colors.DIM}]🔧 Generated API documentation for {len(api_files)} files[/]"
+        )
 
     def _generate_api_overview(self, api_files: List[Document]) -> None:
         """Generate an API overview page."""
         # Collect all public classes and functions
         all_classes = []
         all_functions = []
-        
+
         for doc in api_files:
             for cls in doc.metadata.classes:
                 all_classes.append({"name": cls, "file": doc.metadata.filepath})
             for func in doc.metadata.functions:
                 if not func.startswith("_"):  # Only public functions
                     all_functions.append({"name": func, "file": doc.metadata.filepath})
-        
+
         api_prompt = EnhancedDocumentationPrompts.format_api_documentation_prompt(
             project_name=self.project_name,
             project_description=self.project_description,
             api_files_count=len(api_files),
-            public_classes="\n".join([f"- {cls['name']} (in {Path(cls['file']).name})" for cls in all_classes[:20]]),
-            public_functions="\n".join([f"- {func['name']} (in {Path(func['file']).name})" for func in all_functions[:30]]),
+            public_classes="\n".join(
+                [
+                    f"- {cls['name']} (in {Path(cls['file']).name})"
+                    for cls in all_classes[:20]
+                ]
+            ),
+            public_functions="\n".join(
+                [
+                    f"- {func['name']} (in {Path(func['file']).name})"
+                    for func in all_functions[:30]
+                ]
+            ),
             api_context=f"Generated from {len(api_files)} API-relevant files with {len(all_classes)} classes and {len(all_functions)} public functions",
-            style_instructions=PromptFormatters.get_style_instructions(self.style_guide)
+            style_instructions=PromptFormatters.get_style_instructions(
+                self.style_guide
+            ),
         )
 
         try:
             api_content = self.llm_client.document_code(
-                code="",
-                language="markdown",
-                additional_context=api_prompt
+                code="", language="markdown", additional_context=api_prompt
             )
-            
+
             api_path = self.output_dir / "docs" / "api" / "index.md"
             with open(api_path, "w", encoding="utf-8") as f:
-                f.write(api_content or "# API Reference\n\nAPI documentation generation failed.")
-                
+                f.write(
+                    api_content
+                    or "# API Reference\n\nAPI documentation generation failed."
+                )
+
         except Exception as e:
-            self.console.print(f"[{Colors.WARNING}]Warning: Could not generate API overview: {e}[/]")
+            self.console.print(
+                f"[{Colors.WARNING}]Warning: Could not generate API overview: {e}[/]"
+            )
 
     def _generate_cross_references(self) -> None:
         """Generate cross-reference links between documentation files."""
@@ -786,19 +950,25 @@ class DocumentationGenerator:
             transient=False,
         ) as progress:
             cross_ref_task = progress.add_task(
-                f"[{Colors.INFO}]🔗 Generating cross-references...", 
-                total=None
+                f"[{Colors.INFO}]🔗 Generating cross-references...", total=None
             )
-            
+
             # This would scan all generated documentation and add cross-reference links
             # Implementation would depend on the specific cross-referencing strategy
-            progress.update(cross_ref_task, description=f"[{Colors.INFO}]🔗 Scanning documentation files...")
-            
+            progress.update(
+                cross_ref_task,
+                description=f"[{Colors.INFO}]🔗 Scanning documentation files...",
+            )
+
             # Placeholder for actual cross-reference generation
             time.sleep(0.5)  # Simulate work
-            
-            progress.update(cross_ref_task, completed=True, description=f"[{Colors.SUCCESS}]🔗 Cross-references generated")
-        
+
+            progress.update(
+                cross_ref_task,
+                completed=True,
+                description=f"[{Colors.SUCCESS}]🔗 Cross-references generated",
+            )
+
         self.console.print(f"[{Colors.DIM}]🔗 Cross-reference generation completed[/]")
 
     def _build_documentation_site(self) -> None:
@@ -810,27 +980,38 @@ class DocumentationGenerator:
             transient=False,
         ) as progress:
             build_task = progress.add_task(
-                f"[{Colors.INFO}]🏗️  Building documentation site...", 
-                total=3
+                f"[{Colors.INFO}]🏗️  Building documentation site...", total=3
             )
-            
+
             # Generate MkDocs configuration
-            progress.update(build_task, description=f"[{Colors.INFO}]🏗️  Generating MkDocs configuration...")
+            progress.update(
+                build_task,
+                description=f"[{Colors.INFO}]🏗️  Generating MkDocs configuration...",
+            )
             self._generate_mkdocs_config()
             progress.update(build_task, advance=1)
-            
+
             # Generate navigation
-            progress.update(build_task, description=f"[{Colors.INFO}]🏗️  Generating navigation structure...")
+            progress.update(
+                build_task,
+                description=f"[{Colors.INFO}]🏗️  Generating navigation structure...",
+            )
             self._generate_navigation()
             progress.update(build_task, advance=1)
-            
+
             # Build with MkDocs if available
-            progress.update(build_task, description=f"[{Colors.INFO}]🏗️  Building with MkDocs...")
+            progress.update(
+                build_task, description=f"[{Colors.INFO}]🏗️  Building with MkDocs..."
+            )
             self._build_with_mkdocs()
             progress.update(build_task, advance=1)
-            
-            progress.update(build_task, completed=True, description=f"[{Colors.SUCCESS}]🏗️  Documentation site built")
-        
+
+            progress.update(
+                build_task,
+                completed=True,
+                description=f"[{Colors.SUCCESS}]🏗️  Documentation site built",
+            )
+
         self.console.print(f"[{Colors.DIM}]🏗️  Documentation site build completed[/]")
 
     def _generate_mkdocs_config(self) -> None:
@@ -843,7 +1024,7 @@ class DocumentationGenerator:
                 "palette": {"primary": "indigo", "accent": "indigo"},
                 "features": [
                     "navigation.instant",
-                    "navigation.tracking", 
+                    "navigation.tracking",
                     "navigation.expand",
                     "navigation.indexes",
                     "search.highlight",
@@ -854,7 +1035,7 @@ class DocumentationGenerator:
             },
             "markdown_extensions": [
                 "pymdownx.highlight",
-                "pymdownx.superfences", 
+                "pymdownx.superfences",
                 "pymdownx.inlinehilite",
                 "pymdownx.tabbed",
                 "admonition",
@@ -864,7 +1045,7 @@ class DocumentationGenerator:
             "plugins": ["search"],
             "docs_dir": "docs",
         }
-        
+
         config_path = self.output_dir / "mkdocs.yml"
         with open(config_path, "w", encoding="utf-8") as f:
             yaml.dump(config, f, default_flow_style=False)
@@ -874,7 +1055,7 @@ class DocumentationGenerator:
         nav: List[Any] = [
             {"Home": "index.md"},
         ]
-        
+
         # Add guides if they exist
         guides_dir = self.output_dir / "docs" / "guides"
         if guides_dir.exists() and any(guides_dir.iterdir()):
@@ -884,7 +1065,7 @@ class DocumentationGenerator:
                 guide_items.append({title: f"guides/{guide_file.name}"})
             if guide_items:
                 nav.append({"Guides": guide_items})
-        
+
         # Add modules
         modules_dir = self.output_dir / "docs" / "modules"
         if modules_dir.exists() and any(modules_dir.iterdir()):
@@ -894,15 +1075,17 @@ class DocumentationGenerator:
                     index_file = module_dir / "index.md"
                     if index_file.exists():
                         title = module_dir.name.replace("_", " ").title()
-                        module_items.append({title: f"modules/{module_dir.name}/index.md"})
+                        module_items.append(
+                            {title: f"modules/{module_dir.name}/index.md"}
+                        )
             if module_items:
                 nav.append({"Modules": module_items})
-        
+
         # Add API reference
         api_index = self.output_dir / "docs" / "api" / "index.md"
         if api_index.exists():
             nav.append({"API Reference": "api/index.md"})
-        
+
         # Update MkDocs config with navigation
         config_path = self.output_dir / "mkdocs.yml"
         if config_path.exists():
@@ -919,11 +1102,13 @@ class DocumentationGenerator:
                 ["mkdocs", "build"],
                 cwd=self.output_dir,
                 check=True,
-                capture_output=True
+                capture_output=True,
             )
             self.console.print(f"[{Colors.SUCCESS}]MkDocs site built successfully![/]")
         except (subprocess.CalledProcessError, FileNotFoundError):
-            self.console.print(f"[{Colors.WARNING}]MkDocs not available. Documentation generated as Markdown files.[/]")
+            self.console.print(
+                f"[{Colors.WARNING}]MkDocs not available. Documentation generated as Markdown files.[/]"
+            )
 
     def _get_repository_context(self) -> str:
         """Get repository context information."""
@@ -949,48 +1134,53 @@ class DocumentationGenerator:
     def _get_style_instructions(self) -> str:
         """Get style instructions for documentation generation."""
         return PromptFormatters.get_style_instructions(self.style_guide)
-    
+
     def _get_module_category(self, documents: List[Document]) -> str:
         """Get the module category for a set of documents."""
         if not documents:
             return "unknown"
-        
+
         if self.repo_map:
             return self.repo_map._categorize_module(documents[0].metadata.filepath)
         else:
             return Path(documents[0].metadata.filepath).parent.name or "root"
-    
+
     def _get_file_module_category(self, document: Document) -> str:
         """Get the module category for a single file."""
         if self.repo_map:
             return self.repo_map._categorize_module(document.metadata.filepath)
         else:
             return Path(document.metadata.filepath).parent.name or "root"
-    
+
     def _get_related_files_context(self, document: Document) -> str:
         """Get related files context for a document."""
         if self.repo_map:
             related_files = self.repo_map.get_related_files(document.metadata.filepath)
             return PromptFormatters.format_dependencies(related_files[:5])
         return "None identified"
-    
+
     def _get_file_dependencies_context(self, document: Document) -> str:
         """Get file dependencies context for a document."""
         if self.repo_map:
-            dependencies = self.repo_map.get_file_dependencies(document.metadata.filepath)
+            dependencies = self.repo_map.get_file_dependencies(
+                document.metadata.filepath
+            )
             return PromptFormatters.format_dependencies(dependencies[:8])
         return "None identified"
-    
+
     def _get_similar_examples_context(self, document: Document) -> str:
         """Get similar examples context for a document."""
         similar_examples = self._get_similar_code_examples(document)
         return PromptFormatters.format_similar_examples(similar_examples)
-    
+
     def _get_cross_references_context(self, document: Document) -> str:
         """Get cross-references context for a document."""
         cross_refs = self._get_file_cross_references(document)
         # Convert list of strings to list of dicts for proper formatting
-        cross_refs_dicts = [{"type": "reference", "filepath": ref, "context": "Cross-referenced"} for ref in cross_refs]
+        cross_refs_dicts = [
+            {"type": "reference", "filepath": ref, "context": "Cross-referenced"}
+            for ref in cross_refs
+        ]
         return PromptFormatters.format_cross_references(cross_refs_dicts)
 
     def _get_fallback_overview(self) -> str:
@@ -1012,7 +1202,9 @@ This documentation covers {len(self.processed_documents)} files in the codebase.
 Explore the documentation using the navigation menu to understand the codebase structure and implementation details.
 """
 
-    def _get_fallback_module_doc(self, module_name: str, documents: List[Document]) -> str:
+    def _get_fallback_module_doc(
+        self, module_name: str, documents: List[Document]
+    ) -> str:
         """Get fallback module documentation content."""
         total_lines = sum(doc.metadata.line_count for doc in documents)
         return f"""# {module_name.title()} Module
@@ -1034,9 +1226,9 @@ This module contains {len(documents)} files with {total_lines:,} lines of code.
         max_workers: Optional[int] = None,
     ) -> None:
         """Generate documentation for an entire repository.
-        
+
         This method provides compatibility with the old DocumentationGenerator API.
-        
+
         Args:
             documents: List of documents to document
             repo_name: Name of the repository
@@ -1050,7 +1242,7 @@ This module contains {len(documents)} files with {total_lines:,} lines of code.
             self.project_description = repo_description
         if max_workers:
             self.max_workers = max_workers
-        
+
         # Use the main generate_documentation method
         self.generate_documentation(
             documents=documents,
@@ -1063,9 +1255,9 @@ This module contains {len(documents)} files with {total_lines:,} lines of code.
         self, document: Document, project_context: str = ""
     ) -> Optional[str]:
         """Generate documentation for a single document.
-        
+
         This method provides compatibility with the old DocumentationGenerator API.
-        
+
         Args:
             document: Document to generate documentation for
             project_context: Additional context about the project
@@ -1076,68 +1268,76 @@ This module contains {len(documents)} files with {total_lines:,} lines of code.
         try:
             # Generate documentation for the single file
             documentation = self._generate_single_file_doc(document)
-            
+
             # Track the document
             self.processed_documents[document.metadata.filepath] = document
             self.processed_files.add(document.metadata.filepath)
             self.documents_by_path[document.metadata.filepath] = document
-            
+
             return documentation if documentation else None
-            
+
         except Exception as e:
             if self.console:
-                self.console.print(f"[yellow]Warning: Could not generate documentation for {document.metadata.filepath}: {e}[/yellow]")
+                self.console.print(
+                    f"[yellow]Warning: Could not generate documentation for {document.metadata.filepath}: {e}[/yellow]"
+                )
             return None
 
     def build_documentation(self) -> None:
         """Build the final documentation structure.
-        
+
         This method provides compatibility with the old DocumentationGenerator API.
         """
         self._build_documentation_site()
 
     def serve_documentation(self, port: int = 8000) -> None:
         """Serve the documentation using MkDocs or simple HTTP server.
-        
+
         This method provides compatibility with the old DocumentationGenerator API.
-        
+
         Args:
             port: Port to serve the documentation on
         """
         try:
             # Check if MkDocs is installed and try to serve with it
             subprocess.run(["mkdocs", "--version"], check=True, capture_output=True)
-            
+
             # Serve with MkDocs
             if self.console:
-                self.console.print(f"[green]Starting MkDocs server at: http://localhost:{port}[/green]")
+                self.console.print(
+                    f"[green]Starting MkDocs server at: http://localhost:{port}[/green]"
+                )
             subprocess.run(
                 ["mkdocs", "serve", "-a", f"localhost:{port}"], cwd=self.output_dir
             )
         except (subprocess.CalledProcessError, FileNotFoundError):
             if self.console:
-                self.console.print("[yellow]MkDocs not available. Starting simple HTTP server...[/yellow]")
-            
+                self.console.print(
+                    "[yellow]MkDocs not available. Starting simple HTTP server...[/yellow]"
+                )
+
             # Fall back to Python's simple HTTP server
             import http.server
             import socketserver
             import os
-            
+
             # Serve the docs directory
             docs_dir = self.output_dir / "docs"
             if not docs_dir.exists():
                 docs_dir = self.output_dir
-            
+
             current_dir = os.getcwd()
             os.chdir(docs_dir)
-            
+
             try:
                 handler = http.server.SimpleHTTPRequestHandler
                 socketserver.TCPServer.allow_reuse_address = True
-                
+
                 with socketserver.TCPServer(("", port), handler) as httpd:
                     if self.console:
-                        self.console.print(f"[green]Serving at http://localhost:{port}[/green]")
+                        self.console.print(
+                            f"[green]Serving at http://localhost:{port}[/green]"
+                        )
                     httpd.serve_forever()
             finally:
-                os.chdir(current_dir) 
+                os.chdir(current_dir)

@@ -7,11 +7,16 @@ Storage for document embeddings using ChromaDB.
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional, Union
+from collections.abc import Mapping, Sequence
+from typing import Any, Dict, List, Optional, cast
 
 import chromadb
 
 from docstra.core.document_processing.document import Document
+
+ChromaScalar = str | int | float
+ChromaMetadata = Dict[str, ChromaScalar]
+EmbeddingVector = Sequence[float]
 
 
 class ChromaDBStorage:
@@ -40,9 +45,7 @@ class ChromaDBStorage:
             name="chunks", metadata={"description": "Document chunks"}
         )
 
-    def _validate_metadata(
-        self, metadata: Dict[str, Any]
-    ) -> Dict[str, Union[str, int, float, bool]]:
+    def _validate_metadata(self, metadata: Dict[str, Any]) -> ChromaMetadata:
         """Validate and convert metadata to ChromaDB-compatible format.
 
         Args:
@@ -54,7 +57,7 @@ class ChromaDBStorage:
         if not metadata:
             return {}
 
-        result = {}
+        result: ChromaMetadata = {}
 
         for key, value in metadata.items():
             # Handle different types
@@ -106,14 +109,19 @@ class ChromaDBStorage:
             return []
 
         # Validate and convert all metadata
-        safe_metadatas = [self._validate_metadata(meta) for meta in metadatas]
+        safe_metadatas: List[Mapping[str, ChromaScalar]] = [
+            self._validate_metadata(meta) for meta in metadatas
+        ]
+        chroma_embeddings = (
+            cast(List[EmbeddingVector], embeddings) if embeddings is not None else None
+        )
 
         try:
             self.chunk_collection.add(
                 ids=chunk_ids,
                 documents=contents,
                 metadatas=safe_metadatas,
-                embeddings=embeddings,
+                embeddings=chroma_embeddings,
             )
             return chunk_ids
         except Exception as e:
@@ -145,8 +153,12 @@ class ChromaDBStorage:
             self.document_collection.add(
                 ids=[document_id],
                 documents=[content],
-                metadatas=[safe_metadata],
-                embeddings=[embedding] if embedding else None,
+                metadatas=[cast(Mapping[str, ChromaScalar], safe_metadata)],
+                embeddings=(
+                    [cast(EmbeddingVector, embedding)]
+                    if embedding is not None
+                    else None
+                ),
             )
             return document_id
         except Exception as e:
@@ -172,9 +184,19 @@ class ChromaDBStorage:
             doc_embeddings = embeddings.get(doc_id, {})
 
             if doc_embeddings:
-                document_embedding = doc_embeddings.get(doc_id, [])
+                document_embedding = doc_embeddings.get(doc_id)
+                doc_metadata = (
+                    document.metadata.model_dump()
+                    if hasattr(document.metadata, "model_dump")
+                    else document.metadata.dict()
+                )
                 document_ids.append(
-                    self.add_document(document, document_embedding, doc_embeddings)
+                    self.add_document(
+                        document_id=doc_id,
+                        content=document.content,
+                        metadata=doc_metadata,
+                        embedding=document_embedding,
+                    )
                 )
 
         return document_ids
@@ -198,26 +220,31 @@ class ChromaDBStorage:
             where = {k: v for k, v in filters.items() if v is not None}
 
         # Perform the search
-        results = self.document_collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            where=where if where else None,
+        results = cast(
+            Dict[str, Any],
+            self.document_collection.query(
+                query_embeddings=[query_embedding],
+                n_results=n_results,
+                where=where if where else None,
+            ),
         )
+        ids = cast(List[List[str]], results.get("ids") or [])
+        documents = cast(List[List[str]], results.get("documents") or [])
+        metadatas = cast(
+            List[List[Mapping[str, ChromaScalar]]], results.get("metadatas") or []
+        )
+        distances = cast(List[List[float]], results.get("distances") or [])
 
         # Format the results
         formatted_results = []
-        if results["ids"] and results["documents"]:
-            for i, doc_id in enumerate(results["ids"][0]):
+        if ids and documents:
+            for i, doc_id in enumerate(ids[0]):
                 formatted_results.append(
                     {
                         "id": doc_id,
-                        "content": results["documents"][0][i],
-                        "metadata": results["metadatas"][0][i],
-                        "score": (
-                            results["distances"][0][i]
-                            if "distances" in results
-                            else None
-                        ),
+                        "content": documents[0][i],
+                        "metadata": dict(metadatas[0][i]) if metadatas else {},
+                        "score": distances[0][i] if distances else None,
                     }
                 )
 
@@ -242,26 +269,31 @@ class ChromaDBStorage:
             where = {k: v for k, v in filters.items() if v is not None}
 
         # Perform the search
-        results = self.chunk_collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            where=where if where else None,
+        results = cast(
+            Dict[str, Any],
+            self.chunk_collection.query(
+                query_embeddings=[query_embedding],
+                n_results=n_results,
+                where=where if where else None,
+            ),
         )
+        ids = cast(List[List[str]], results.get("ids") or [])
+        documents = cast(List[List[str]], results.get("documents") or [])
+        metadatas = cast(
+            List[List[Mapping[str, ChromaScalar]]], results.get("metadatas") or []
+        )
+        distances = cast(List[List[float]], results.get("distances") or [])
 
         # Format the results
         formatted_results = []
-        if results["ids"] and results["documents"]:
-            for i, chunk_id in enumerate(results["ids"][0]):
+        if ids and documents:
+            for i, chunk_id in enumerate(ids[0]):
                 formatted_results.append(
                     {
                         "id": chunk_id,
-                        "content": results["documents"][0][i],
-                        "metadata": results["metadatas"][0][i],
-                        "score": (
-                            results["distances"][0][i]
-                            if "distances" in results
-                            else None
-                        ),
+                        "content": documents[0][i],
+                        "metadata": dict(metadatas[0][i]) if metadatas else {},
+                        "score": distances[0][i] if distances else None,
                     }
                 )
 
@@ -277,13 +309,20 @@ class ChromaDBStorage:
             The document if found, None otherwise
         """
         try:
-            result = self.document_collection.get(ids=[document_id])
+            result = cast(
+                Dict[str, Any], self.document_collection.get(ids=[document_id])
+            )
+            ids = cast(List[str], result.get("ids") or [])
+            documents = cast(List[str], result.get("documents") or [])
+            metadatas = cast(
+                List[Mapping[str, ChromaScalar]], result.get("metadatas") or []
+            )
 
-            if result["ids"]:
+            if ids and documents and metadatas:
                 return {
-                    "id": result["ids"][0],
-                    "content": result["documents"][0],
-                    "metadata": result["metadatas"][0],
+                    "id": ids[0],
+                    "content": documents[0],
+                    "metadata": dict(metadatas[0]),
                 }
             return None
         except Exception:
@@ -299,16 +338,24 @@ class ChromaDBStorage:
             List of chunks for the document
         """
         try:
-            results = self.chunk_collection.get(where={"document_id": document_id})
+            results = cast(
+                Dict[str, Any],
+                self.chunk_collection.get(where={"document_id": document_id}),
+            )
+            ids = cast(List[str], results.get("ids") or [])
+            documents = cast(List[str], results.get("documents") or [])
+            metadatas = cast(
+                List[Mapping[str, ChromaScalar]], results.get("metadatas") or []
+            )
 
             formatted_results = []
-            if results["ids"]:
-                for i, chunk_id in enumerate(results["ids"]):
+            if ids and documents and metadatas:
+                for i, chunk_id in enumerate(ids):
                     formatted_results.append(
                         {
                             "id": chunk_id,
-                            "content": results["documents"][i],
-                            "metadata": results["metadatas"][i],
+                            "content": documents[i],
+                            "metadata": dict(metadatas[i]),
                         }
                     )
 

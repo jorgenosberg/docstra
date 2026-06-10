@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import tiktoken
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
 
 from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain_ollama.embeddings import OllamaEmbeddings
@@ -20,28 +20,28 @@ from docstra.core.document_processing.document import Document
 
 class EmbeddingUsageTracker:
     """Tracks token usage and costs for embedding generation."""
-    
+
     # OpenAI embedding pricing per 1K tokens (as of 2024)
     OPENAI_EMBEDDING_PRICING = {
         "text-embedding-3-small": 0.00002,  # $0.00002 per 1K tokens
         "text-embedding-3-large": 0.00013,  # $0.00013 per 1K tokens
-        "text-embedding-ada-002": 0.0001,   # $0.0001 per 1K tokens
+        "text-embedding-ada-002": 0.0001,  # $0.0001 per 1K tokens
     }
-    
+
     def __init__(self) -> None:
         """Initialize the usage tracker."""
         self.total_tokens = 0
         self.total_cost = 0.0
         self.total_requests = 0
         self.usage_history: List[Dict[str, Any]] = []
-    
+
     def _estimate_tokens(self, text: str, model: str = "text-embedding-3-small") -> int:
         """Estimate token count for text using tiktoken.
-        
+
         Args:
             text: Text to estimate tokens for
             model: Model name for encoding selection
-            
+
         Returns:
             Estimated token count
         """
@@ -52,39 +52,39 @@ class EmbeddingUsageTracker:
         except Exception:
             # Fallback: rough estimate of 4 characters per token
             return len(text) // 4
-    
+
     def record_usage(
-        self, 
-        provider: str, 
-        model: str, 
-        texts: List[str], 
-        request_type: str = "embedding"
+        self,
+        provider: str,
+        model: str,
+        texts: List[str],
+        request_type: str = "embedding",
     ) -> Dict[str, Any]:
         """Record embedding usage.
-        
+
         Args:
             provider: Embedding provider (openai, huggingface, ollama)
             model: Model name
             texts: List of texts that were embedded
             request_type: Type of request
-            
+
         Returns:
             Usage information dictionary
         """
         # Calculate token usage
         total_tokens = sum(self._estimate_tokens(text, model) for text in texts)
-        
+
         # Calculate cost (only for OpenAI)
         cost = 0.0
         if provider.lower() == "openai":
             rate = self.OPENAI_EMBEDDING_PRICING.get(model, 0.0001)  # Default rate
             cost = (total_tokens / 1000) * rate
-        
+
         # Update totals
         self.total_tokens += total_tokens
         self.total_cost += cost
         self.total_requests += 1
-        
+
         # Create usage record
         usage_record = {
             "provider": provider,
@@ -95,13 +95,13 @@ class EmbeddingUsageTracker:
             "request_type": request_type,
             "timestamp": __import__("time").time(),
         }
-        
+
         self.usage_history.append(usage_record)
         return usage_record
-    
+
     def get_summary(self) -> Dict[str, Any]:
         """Get usage summary.
-        
+
         Returns:
             Summary of usage statistics
         """
@@ -109,7 +109,8 @@ class EmbeddingUsageTracker:
             "total_tokens": self.total_tokens,
             "total_cost": self.total_cost,
             "total_requests": self.total_requests,
-            "average_tokens_per_request": self.total_tokens / max(1, self.total_requests),
+            "average_tokens_per_request": self.total_tokens
+            / max(1, self.total_requests),
         }
 
 
@@ -146,7 +147,7 @@ class EmbeddingGenerator(ABC):
 
     def get_usage_summary(self) -> Dict[str, Any]:
         """Get usage summary for this generator.
-        
+
         Returns:
             Usage summary dictionary
         """
@@ -156,7 +157,9 @@ class EmbeddingGenerator(ABC):
 class HuggingFaceEmbeddingGenerator(EmbeddingGenerator):
     """Embedding generator using HuggingFace models."""
 
-    def __init__(self, model_name: str = "sentence-transformers/all-mpnet-base-v2") -> None:
+    def __init__(
+        self, model_name: str = "sentence-transformers/all-mpnet-base-v2"
+    ) -> None:
         """Initialize the HuggingFace embedding generator.
 
         Args:

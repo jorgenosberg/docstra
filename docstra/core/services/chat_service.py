@@ -19,7 +19,11 @@ from docstra.core.llm.local import LocalModelClient
 from docstra.core.llm.ollama import OllamaClient
 from docstra.core.llm.openai import OpenAIClient
 from docstra.core.services.query_service import QueryService
-from docstra.core.utils.token_counter import get_token_counter, ContextBudgetManager, count_tokens_in_messages
+from docstra.core.utils.token_counter import (
+    get_token_counter,
+    ContextBudgetManager,
+    count_tokens_in_messages,
+)
 
 
 # Database schema constants
@@ -99,11 +103,10 @@ class ChatService:
         # Token management for conversation
         self.token_counter = get_token_counter(
             self.user_config.model.model_name_chat or self.user_config.model.model_name,
-            self.user_config.model.provider
+            self.user_config.model.provider,
         )
         self.budget_manager = ContextBudgetManager(
-            self.token_counter,
-            self.user_config.model.context_mode
+            self.token_counter, self.user_config.model.context_mode
         )
 
         self.db_path = self._get_db_path()
@@ -112,7 +115,7 @@ class ChatService:
         self.current_session_id: Optional[str] = None
         self.current_chat_history: List[Dict[str, str]] = []
         self.current_codebase_path_context: Optional[Path] = None
-        
+
         # Track last interaction details for stats
         self.last_interaction: Optional[Dict[str, Any]] = None
 
@@ -330,17 +333,14 @@ class ChatService:
 
         # Manage conversation context within budget
         budget_info = self.budget_manager.get_budget_info()
-        
-        # Calculate tokens used by conversation history
-        history_tokens = count_tokens_in_messages(self.current_chat_history, self.token_counter)
-        
+
         # Reserve budget for RAG context and response
         rag_budget = int(budget_info["context_budget"] * 0.6)  # 60% for RAG
         conversation_budget = budget_info["context_budget"] - rag_budget
-        
+
         # Trim conversation history if needed
         trimmed_history = self._trim_conversation_to_budget(conversation_budget)
-        
+
         self.console.print(
             f"[dim]Chat context: {len(trimmed_history)} messages "
             f"(~{count_tokens_in_messages(trimmed_history, self.token_counter):,} tokens), "
@@ -352,7 +352,7 @@ class ChatService:
             question=user_query,
             codebase_path_str=str(self.current_codebase_path_context),
             n_results=3,
-            suppress_status=True  # Suppress status displays to avoid Rich Live display conflicts
+            suppress_status=True,  # Suppress status displays to avoid Rich Live display conflicts
         )
 
         # Create enhanced response using both conversation context and RAG
@@ -361,11 +361,13 @@ class ChatService:
         )
 
         # Calculate token usage for this interaction
-        conversation_tokens = count_tokens_in_messages(trimmed_history, self.token_counter)
+        conversation_tokens = count_tokens_in_messages(
+            trimmed_history, self.token_counter
+        )
         context_tokens = self.token_counter.count_tokens(context_answer)
         response_tokens = self.token_counter.count_tokens(enhanced_response)
         total_tokens = conversation_tokens + context_tokens + response_tokens
-        
+
         # Store interaction details for stats
         self.last_interaction = {
             "user_query": user_query,
@@ -376,15 +378,15 @@ class ChatService:
             "context_mode": self.user_config.model.context_mode,
             "model_name": self.user_config.model.model_name,
             "provider": self.user_config.model.provider.value,
-            "sources_count": len(sources)
+            "sources_count": len(sources),
         }
-        
+
         response_metadata = {
             "sources": sources,
             "conversation_tokens": conversation_tokens,
-            "total_messages": len(trimmed_history)
+            "total_messages": len(trimmed_history),
         }
-        
+
         self._add_message_to_history(
             "assistant", enhanced_response, metadata=response_metadata
         )
@@ -395,43 +397,43 @@ class ChatService:
         """Get a simple one-line summary of the last interaction's token usage."""
         if not self.last_interaction:
             return "no usage data available"
-        
+
         interaction = self.last_interaction
         total_tokens = interaction["total_tokens"]
         context_tokens = interaction["context_tokens"]
-        
+
         # Get context window for percentage calculation
         context_window = self.user_config.model.context_window
         if not context_window:
             context_window = self.token_counter.estimate_max_context()
-        
+
         usage_percent = (total_tokens / context_window) * 100
-        
+
         return f"{total_tokens:,} tokens ({usage_percent:.1f}% of {context_window:,}) | {context_tokens:,} context | {interaction['context_mode']} mode"
 
     def _trim_conversation_to_budget(self, budget: int) -> List[Dict[str, str]]:
         """Trim conversation history to fit within budget while preserving recent context."""
-        
+
         if not self.current_chat_history:
             return []
-        
+
         # Always keep the most recent user message
         recent_messages = []
         current_tokens = 0
-        
+
         # Go backwards through history to keep most recent messages
         for message in reversed(self.current_chat_history):
             message_tokens = self.token_counter.count_tokens(
                 f"{message.get('role', '')}: {message.get('content', '')}"
             )
-            
+
             if current_tokens + message_tokens > budget and recent_messages:
                 # Budget exceeded and we have at least one message
                 break
-            
+
             recent_messages.insert(0, message)  # Insert at beginning to maintain order
             current_tokens += message_tokens
-        
+
         return recent_messages
 
     def _create_enhanced_response(
@@ -439,22 +441,30 @@ class ChatService:
         user_query: str,
         rag_answer: str,
         conversation_history: List[Dict[str, str]],
-        sources: List[Dict[str, Any]]
+        sources: List[Dict[str, Any]],
     ) -> str:
         """Create an enhanced response using conversation context and RAG results."""
-        
+
         # For now, we'll use the RAG answer directly but could enhance it
         # with conversation-aware processing in the future
-        
+
         # Check if this is a follow-up question
         if len(conversation_history) > 1:
             # Look for continuation words that suggest follow-up
-            follow_up_indicators = ["also", "additionally", "furthermore", "what about", "how about"]
-            if any(indicator in user_query.lower() for indicator in follow_up_indicators):
+            follow_up_indicators = [
+                "also",
+                "additionally",
+                "furthermore",
+                "what about",
+                "how about",
+            ]
+            if any(
+                indicator in user_query.lower() for indicator in follow_up_indicators
+            ):
                 # This might be a follow-up question
                 prefix = "Based on our previous discussion and the codebase: "
                 return f"{prefix}{rag_answer}"
-        
+
         return rag_answer
 
     def list_sessions(self, limit: int = 10) -> List[Dict[str, Any]]:

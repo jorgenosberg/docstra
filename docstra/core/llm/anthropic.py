@@ -11,10 +11,14 @@ import time
 from typing import Any, Dict, List, Optional, Union
 
 import anthropic
+from anthropic.types import TextBlock
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from docstra.core.llm.prompt import PromptBuilder
-from docstra.core.tracking.llm_tracker import get_global_tracker
+from docstra.core.tracking.llm_tracker import (
+    UniversalLLMTracker,
+    get_global_tracker,
+)
 
 
 class AnthropicClient:
@@ -52,10 +56,10 @@ class AnthropicClient:
 
         # Initialize prompt builder
         self.prompt_builder = PromptBuilder()
-        
+
         # Initialize tracker
         if self.enable_tracking:
-            self.tracker = get_global_tracker()
+            self.tracker: Optional[UniversalLLMTracker] = get_global_tracker()
         else:
             self.tracker = None
 
@@ -74,7 +78,7 @@ class AnthropicClient:
             Generated response
         """
         start_time = time.perf_counter()
-        
+
         try:
             response = self.client.messages.create(
                 model=self.model_name,
@@ -83,7 +87,9 @@ class AnthropicClient:
                 messages=[{"role": "user", "content": prompt}],
             )
 
-            output_text = response.content[0].text
+            output_text = "".join(
+                block.text for block in response.content if isinstance(block, TextBlock)
+            )
             end_time = time.perf_counter()
             duration_ms = (end_time - start_time) * 1000
 
@@ -93,7 +99,7 @@ class AnthropicClient:
                 usage = response.usage
                 input_tokens = usage.input_tokens if usage else None
                 output_tokens = usage.output_tokens if usage else None
-                
+
                 self.tracker.track_llm_call(
                     provider="anthropic",
                     model=self.model_name,
@@ -106,7 +112,7 @@ class AnthropicClient:
                 )
 
             return output_text
-            
+
         except Exception as e:
             # Track error if tracking enabled
             if self.tracker:
@@ -114,7 +120,7 @@ class AnthropicClient:
                 duration_ms = (end_time - start_time) * 1000
                 error_metadata = (metadata or {}).copy()
                 error_metadata.update({"error": str(e), "status": "error"})
-                
+
                 self.tracker.track_llm_call(
                     provider="anthropic",
                     model=self.model_name,
@@ -125,7 +131,7 @@ class AnthropicClient:
                     output_tokens=0,
                     metadata=error_metadata,
                 )
-            
+
             # Log the error and re-raise for retry
             print(f"Error in Anthropic API call: {str(e)}")
             raise
@@ -147,7 +153,9 @@ class AnthropicClient:
             code=code, language=language, additional_context=additional_context
         )
 
-        return self.generate(prompt, metadata={"request_type": "document_code", "language": language})
+        return self.generate(
+            prompt, metadata={"request_type": "document_code", "language": language}
+        )
 
     def explain_code(
         self, code: str, language: str, additional_context: str = ""
@@ -166,7 +174,9 @@ class AnthropicClient:
             code=code, language=language, additional_context=additional_context
         )
 
-        return self.generate(prompt, metadata={"request_type": "explain_code", "language": language})
+        return self.generate(
+            prompt, metadata={"request_type": "explain_code", "language": language}
+        )
 
     def answer_question(
         self, question: str, context: Union[str, List[Dict[str, Any]]]
@@ -191,11 +201,14 @@ class AnthropicClient:
         elif isinstance(context, list):
             context_size = sum(len(str(item)) for item in context)
 
-        return self.generate(prompt, metadata={
-            "request_type": "answer_question", 
-            "context_size": context_size,
-            "question_length": len(question)
-        })
+        return self.generate(
+            prompt,
+            metadata={
+                "request_type": "answer_question",
+                "context_size": context_size,
+                "question_length": len(question),
+            },
+        )
 
     def generate_examples(
         self, request: str, language: str, additional_context: str = ""
@@ -214,7 +227,9 @@ class AnthropicClient:
             request=request, language=language, additional_context=additional_context
         )
 
-        return self.generate(prompt, metadata={"request_type": "generate_examples", "language": language})
+        return self.generate(
+            prompt, metadata={"request_type": "generate_examples", "language": language}
+        )
 
     def custom_request(self, template_name: str, **kwargs) -> str:
         """Make a custom request using a template.
@@ -230,7 +245,9 @@ class AnthropicClient:
             template_name=template_name, **kwargs
         )
 
-        return self.generate(prompt, metadata={"request_type": "custom", "template": template_name})
+        return self.generate(
+            prompt, metadata={"request_type": "custom", "template": template_name}
+        )
 
     def add_template(self, name: str, template: str) -> None:
         """Add a new template or override an existing one.
