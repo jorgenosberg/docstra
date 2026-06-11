@@ -1163,8 +1163,7 @@ def create_services_for_config(user_config: UserConfig) -> tuple:
     Returns:
         Tuple of (ingestion_service, query_service, chat_service, documentation_service)
     """
-    llm_tracker = get_llm_tracker()
-    callbacks = [llm_tracker] if llm_tracker else None
+    callbacks = None
 
     ingestion_service = IngestionService(console=console, callbacks=callbacks)
     query_service = QueryService(
@@ -1705,6 +1704,8 @@ def _create_retrieval_eval_runner(
     embedding_generator = EmbeddingFactory.create_embedding_generator(
         embedding_type=user_config.embedding.provider,
         model_name=user_config.embedding.model_name,
+        api_key=user_config.embedding.api_key or user_config.model.api_key,
+        api_base=user_config.model.api_base,
     )
     storage = ChromaDBStorage(persist_directory=str(chroma_path))
     base_retriever = ChromaRetriever(storage, embedding_generator)

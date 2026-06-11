@@ -11,11 +11,12 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Dict, List, Optional, cast
 
 import chromadb
+from chromadb.types import Metadata
 
 from docstra.core.document_processing.document import Document
 
-ChromaScalar = str | int | float
-ChromaMetadata = Dict[str, ChromaScalar]
+ChromaScalar = str | int | float | bool
+ChromaMetadata = Metadata
 EmbeddingVector = Sequence[float]
 
 
@@ -57,7 +58,7 @@ class ChromaDBStorage:
         if not metadata:
             return {}
 
-        result: ChromaMetadata = {}
+        result: Dict[str, Any] = {}
 
         for key, value in metadata.items():
             # Handle different types
@@ -109,7 +110,7 @@ class ChromaDBStorage:
             return []
 
         # Validate and convert all metadata
-        safe_metadatas: List[Mapping[str, ChromaScalar]] = [
+        safe_metadatas: List[ChromaMetadata] = [
             self._validate_metadata(meta) for meta in metadatas
         ]
         chroma_embeddings = (
@@ -153,7 +154,7 @@ class ChromaDBStorage:
             self.document_collection.add(
                 ids=[document_id],
                 documents=[content],
-                metadatas=[cast(Mapping[str, ChromaScalar], safe_metadata)],
+                metadatas=[safe_metadata],
                 embeddings=(
                     [cast(EmbeddingVector, embedding)]
                     if embedding is not None

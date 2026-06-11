@@ -35,13 +35,10 @@ def _get_llm_client_for_chat_service(
     config: UserConfig, callbacks: Optional[List[Any]] = None
 ):
     """
-    Helper to get LLM client based on config, applying callbacks.
-    Ensures DocstraStatsCallbackHandler is included.
+    Helper to get LLM client based on config.
     """
     provider = config.model.provider
 
-    # Currently only AnthropicClient and OpenAIClient support callbacks
-    # So we need to handle each case separately
     if provider == ModelProvider.ANTHROPIC:
         return AnthropicClient(
             model_name=config.model.model_name_chat
@@ -72,7 +69,6 @@ def _get_llm_client_for_chat_service(
             max_tokens=config.model.max_tokens,
             temperature=config.model.temperature,
             device=config.model.device,
-            # callbacks removed
         )
     else:
         raise ValueError(f"Unsupported model provider in ChatService: {provider}")
@@ -91,7 +87,7 @@ class ChatService:
     ):
         self.user_config = user_config
         self.console = console or Console()
-        self.callbacks = callbacks  # Will be passed to _get_llm_client_for_chat_service
+        self.callbacks = callbacks
 
         self.llm_client: LLMClient = _get_llm_client_for_chat_service(
             self.user_config, self.callbacks

@@ -67,6 +67,8 @@ class docstraant:
         self.embedding_generator = EmbeddingFactory.create_embedding_generator(
             embedding_type=self.config.embedding.provider,
             model_name=self.config.embedding.model_name,
+            api_key=self.config.embedding.api_key or self.config.model.api_key,
+            api_base=self.config.model.api_base,
         )
 
         # Document processor

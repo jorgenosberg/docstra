@@ -1,14 +1,11 @@
 # File: ./docstra/core/tracking/llm_tracker.py
 """
-Callback handler and utilities for tracking LLM operation statistics.
+Utilities for tracking LLM operation statistics.
 """
 
 import time
 import uuid
 from typing import Any, Dict, List, Optional, ClassVar
-from uuid import UUID
-from langchain_core.callbacks.base import BaseCallbackHandler
-from langchain_core.outputs import LLMResult
 import tiktoken
 from pathlib import Path
 import json
@@ -45,7 +42,7 @@ def _estimate_tokens(text: str, model_name: str = "gpt-3.5-turbo") -> int:
 class UniversalLLMTracker:
     """
     Universal LLM tracker that works with all providers.
-    Supports both callback-based tracking (for LangChain models) and direct tracking.
+    Tracks calls directly across supported providers.
     """
 
     # Enhanced pricing data with more models
@@ -258,170 +255,9 @@ def get_global_tracker() -> UniversalLLMTracker:
     return _global_tracker
 
 
-class DocstraStatsCallbackHandler(BaseCallbackHandler):
-    """
-    Enhanced callback Handler for collecting LLM operation statistics.
-    Now integrates with UniversalLLMTracker for consistent tracking.
-    """
-
-    def __init__(self, tracker: Optional[UniversalLLMTracker] = None):
-        super().__init__()
-        self.tracker = tracker or get_global_tracker()
-        self.current_call_data: Dict[str, Any] = {}
-
-    def on_llm_start(
-        self,
-        serialized: Dict[str, Any],
-        prompts: List[str],
-        *,
-        run_id: UUID,
-        parent_run_id: Optional[UUID] = None,
-        tags: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Run when LLM starts running."""
-        self.current_call_data = {
-            "call_id": str(uuid.uuid4()),
-            "start_time": time.perf_counter(),
-            "prompts": prompts,
-            "model_name": serialized.get("name", serialized.get("id", ["Unknown"])[-1]),
-            "invocation_params": kwargs.get("invocation_params", {}),
-        }
-
-    def on_llm_end(
-        self,
-        response: LLMResult,
-        *,
-        run_id: UUID,
-        parent_run_id: Optional[UUID] = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Run when LLM ends running."""
-        end_time = time.perf_counter()
-        duration_ms = (
-            end_time - self.current_call_data.get("start_time", end_time)
-        ) * 1000
-
-        # Extract token usage from response
-        llm_output = response.llm_output if response.llm_output else {}
-        token_usage = llm_output.get("token_usage", {})
-
-        input_tokens = token_usage.get("prompt_tokens")
-        output_tokens = token_usage.get("completion_tokens")
-
-        # Get model name
-        model_name = self.current_call_data.get("model_name", "Unknown")
-
-        # Determine provider from model name or invocation params
-        provider = self._determine_provider(
-            model_name, self.current_call_data.get("invocation_params", {})
-        )
-
-        # Get text content
-        input_text = "\n".join(self.current_call_data.get("prompts", []))
-        output_text = ""
-        if response.generations:
-            output_text = "".join(
-                gen.text for run_gens in response.generations for gen in run_gens
-            )
-
-        # Track the call
-        self.tracker.track_llm_call(
-            provider=provider,
-            model=model_name,
-            input_text=input_text,
-            output_text=output_text,
-            duration_ms=duration_ms,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            metadata={"callback_source": "langchain"},
-        )
-
-        self.current_call_data = {}
-
-    def on_llm_error(
-        self,
-        error: BaseException,
-        *,
-        run_id: UUID,
-        parent_run_id: Optional[UUID] = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Run when LLM errors."""
-        # Still track failed calls for monitoring
-        end_time = time.perf_counter()
-        duration_ms = (
-            end_time - self.current_call_data.get("start_time", end_time)
-        ) * 1000
-
-        model_name = self.current_call_data.get("model_name", "Unknown")
-        provider = self._determine_provider(
-            model_name, self.current_call_data.get("invocation_params", {})
-        )
-
-        # Track error
-        error_record = {
-            "call_id": self.current_call_data.get("call_id"),
-            "timestamp": time.time(),
-            "provider": provider,
-            "model": model_name,
-            "duration_ms": duration_ms,
-            "error": str(error),
-            "metadata": {"callback_source": "langchain", "status": "error"},
-        }
-
-        # Add to session stats as error record
-        self.tracker.session_stats.append(error_record)
-        self.current_call_data = {}
-
-    def _determine_provider(
-        self, model_name: str, invocation_params: Dict[str, Any]
-    ) -> str:
-        """Determine provider from model name or invocation params."""
-        model_lower = model_name.lower()
-
-        if "claude" in model_lower or "anthropic" in model_lower:
-            return "anthropic"
-        elif "gpt" in model_lower or "openai" in model_lower:
-            return "openai"
-        elif (
-            "ollama" in model_lower
-            or invocation_params.get("base_url", "").find("11434") != -1
-        ):
-            return "ollama"
-        else:
-            return "unknown"
-
-    def on_chain_start(
-        self,
-        serialized: Dict[str, Any],
-        inputs: Dict[str, Any],
-        *,
-        run_id: UUID,
-        parent_run_id: Optional[UUID] = None,
-        tags: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Run when chain starts running."""
-        pass
-
-    def on_chain_end(
-        self,
-        outputs: Dict[str, Any],
-        *,
-        run_id: UUID,
-        parent_run_id: Optional[UUID] = None,
-        **kwargs: Any,
-    ) -> Any:
-        """Run when chain ends running."""
-        pass
-
-
-# Example of how to potentially track embedding usage (if not covered by LLM callbacks)
+# Example of how to potentially track embedding usage alongside direct model calls
 # This would require modifying how embeddings are called.
-# For now, focusing on LLM calls via the callback handler.
+# For now, this module focuses on direct LLM calls.
 
 # def track_embedding_call(func):
 #     """
