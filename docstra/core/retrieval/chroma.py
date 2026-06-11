@@ -10,13 +10,17 @@ from typing import Any, Dict, List, Optional
 
 from docstra.core.ingestion.embeddings import EmbeddingGenerator
 from docstra.core.ingestion.storage import ChromaDBStorage
+from docstra.core.indexing.model import normalize_file_id
 
 
 class ChromaRetriever:
     """Retriever for documents and chunks using ChromaDB."""
 
     def __init__(
-        self, storage: ChromaDBStorage, embedding_generator: EmbeddingGenerator
+        self,
+        storage: ChromaDBStorage,
+        embedding_generator: EmbeddingGenerator,
+        codebase_root: Optional[str] = None,
     ):
         """Initialize the ChromaDB retriever.
 
@@ -26,6 +30,7 @@ class ChromaRetriever:
         """
         self.storage = storage
         self.embedding_generator = embedding_generator
+        self.codebase_root = codebase_root
 
     def retrieve_documents(
         self, query: str, n_results: int = 10, **filters
@@ -105,10 +110,11 @@ class ChromaRetriever:
         Returns:
             List of matching chunks
         """
+        file_id = normalize_file_id(filepath, self.codebase_root)
         return self.retrieve_by_context(
             query=query,
             context_type="document_id",
-            context_value=filepath,
+            context_value=file_id,
             n_results=n_results,
         )
 
@@ -141,8 +147,9 @@ class ChromaRetriever:
         Returns:
             Document and its chunks
         """
-        document = self.storage.get_document(document_id)
-        chunks = self.storage.get_chunks_for_document(document_id)
+        normalized_id = normalize_file_id(document_id, self.codebase_root)
+        document = self.storage.get_document(normalized_id)
+        chunks = self.storage.get_chunks_for_document(normalized_id)
 
         return {"document": document, "chunks": chunks}
 
@@ -155,7 +162,8 @@ class ChromaRetriever:
         Returns:
             The document if found, None otherwise
         """
-        return self.storage.get_document(document_id)
+        normalized_id = normalize_file_id(document_id, self.codebase_root)
+        return self.storage.get_document(normalized_id)
 
     def get_chunks_for_document(self, document_id: str) -> List[Dict[str, Any]]:
         """Get all chunks for a document.
@@ -166,4 +174,5 @@ class ChromaRetriever:
         Returns:
             List of chunks for the document
         """
-        return self.storage.get_chunks_for_document(document_id)
+        normalized_id = normalize_file_id(document_id, self.codebase_root)
+        return self.storage.get_chunks_for_document(normalized_id)

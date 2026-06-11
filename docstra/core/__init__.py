@@ -5,6 +5,7 @@ docstra: LLM-powered code documentation assistant.
 """
 
 from collections.abc import Generator
+from pathlib import Path
 
 from docstra import __version__ as __version__
 
@@ -86,16 +87,28 @@ class docstraant:
         )
 
         # Document indexer
-        self.document_indexer = DocumentIndexer(self.storage, self.embedding_generator)
+        self.document_indexer = DocumentIndexer(
+            self.storage,
+            self.embedding_generator,
+            codebase_root=str(Path.cwd()),
+        )
 
         # Code indexer
         self.code_indexer = CodebaseIndexer(
             index_directory=f"{storage_dir}/index",
             exclude_patterns=self.config.processing.exclude_patterns,
+            codebase_root=str(Path.cwd()),
+            embedding_backend="chroma",
+            embedding_model=self.config.embedding.model_name,
+            source_kinds=["tree-sitter"],
         )
 
         # Retriever
-        self.retriever = ChromaRetriever(self.storage, self.embedding_generator)
+        self.retriever = ChromaRetriever(
+            self.storage,
+            self.embedding_generator,
+            codebase_root=str(Path.cwd()),
+        )
 
         # Hybrid retriever
         self.hybrid_retriever = HybridRetriever(

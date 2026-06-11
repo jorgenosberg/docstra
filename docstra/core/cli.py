@@ -36,7 +36,8 @@ from docstra.core.config.settings import (
 )
 from docstra.core.document_processing.extractor import DocumentProcessor
 from docstra.core.documentation.generator import DocumentationGenerator
-from docstra.core.indexing.code_index import CodebaseIndexer
+from docstra.core.indexing.code_index import CodebaseIndex, CodebaseIndexer
+from docstra.core.indexing.model import CORE_INDEX_FILENAME
 from docstra.core.ingestion.embeddings import EmbeddingFactory
 from docstra.core.ingestion.storage import ChromaDBStorage
 from docstra.core.llm.anthropic import AnthropicClient
@@ -1689,16 +1690,25 @@ def _create_retrieval_eval_runner(
     user_config: UserConfig, abs_codebase_path: Path
 ) -> Callable[[str, int], List[Dict[str, Any]]]:
     _, chroma_path, index_path = _get_persist_paths(user_config, abs_codebase_path)
+    core_index_path = index_path / CORE_INDEX_FILENAME
     chroma_check_file = chroma_path / "chroma.sqlite3"
+    legacy_index_artifacts = CodebaseIndex.legacy_artifacts_in(index_path)
+    legacy_repo_map = index_path.parent / "repo_map.json"
 
-    if not index_path.exists() or not chroma_check_file.exists():
+    if not core_index_path.exists() or not chroma_check_file.exists():
+        migration_hint = ""
+        if legacy_index_artifacts or legacy_repo_map.exists():
+            migration_hint = (
+                " Legacy index artifacts were found. Rerun 'docstra ingest' "
+                "to rebuild the index in the new format."
+            )
         raise FileNotFoundError(
             f"Codebase at {abs_codebase_path} is not fully initialized for "
             f"retrieval evaluation. ChromaDB path: {chroma_path} "
             f"(check file: {chroma_check_file}, exists: "
-            f"{chroma_check_file.exists()}), index path: {index_path} "
-            f"(exists: {index_path.exists()}). Run 'docstra init' and "
-            "'docstra ingest' first."
+            f"{chroma_check_file.exists()}), core index path: {core_index_path} "
+            f"(exists: {core_index_path.exists()}). Run 'docstra init' and "
+            f"'docstra ingest' first.{migration_hint}"
         )
 
     embedding_generator = EmbeddingFactory.create_embedding_generator(
@@ -1708,8 +1718,15 @@ def _create_retrieval_eval_runner(
         api_base=user_config.model.api_base,
     )
     storage = ChromaDBStorage(persist_directory=str(chroma_path))
-    base_retriever = ChromaRetriever(storage, embedding_generator)
-    code_indexer = CodebaseIndexer(index_directory=str(index_path))
+    base_retriever = ChromaRetriever(
+        storage,
+        embedding_generator,
+        codebase_root=str(abs_codebase_path),
+    )
+    code_indexer = CodebaseIndexer(
+        index_directory=str(index_path),
+        codebase_root=str(abs_codebase_path),
+    )
     code_index = code_indexer.get_index()
 
     if code_index:

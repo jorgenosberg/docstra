@@ -18,7 +18,8 @@ from docstra.core.llm.openai import OpenAIClient
 from docstra.core.ingestion.embeddings import EmbeddingFactory
 from docstra.core.ingestion.storage import ChromaDBStorage
 from docstra.core.retrieval.chroma import ChromaRetriever
-from docstra.core.indexing.code_index import CodebaseIndexer
+from docstra.core.indexing.code_index import CodebaseIndex, CodebaseIndexer
+from docstra.core.indexing.model import CORE_INDEX_FILENAME
 from docstra.core.retrieval.hybrid import HybridRetriever
 from docstra.core.retrieval.context_aware import ContextAwareRetriever
 from docstra.core.utils.token_counter import get_token_counter, ContextBudgetManager
@@ -129,46 +130,54 @@ class QueryService:
 
         chroma_path = effective_persist_dir / "chroma"
         index_path = effective_persist_dir / "index"
+        core_index_path = index_path / CORE_INDEX_FILENAME
         chroma_check_file = chroma_path / "chroma.sqlite3"
+        legacy_index_artifacts = CodebaseIndex.legacy_artifacts_in(index_path)
+        legacy_repo_map = effective_persist_dir / "repo_map.json"
 
-        if not index_path.exists() or not chroma_check_file.exists():
+        if not core_index_path.exists() or not chroma_check_file.exists():
+            migration_hint = ""
+            if legacy_index_artifacts or legacy_repo_map.exists():
+                migration_hint = (
+                    " Legacy index artifacts were found. Rerun 'docstra ingest' "
+                    "to rebuild the index in the new format."
+                )
             error_msg = (
                 f"Codebase at {abs_codebase_path} not fully initialized for querying. "
                 f"ChromaDB path: {chroma_path} (check file: {chroma_check_file}, exists: {chroma_check_file.exists()}), "
-                f"Index path: {index_path} (exists: {index_path.exists()}). "
+                f"Core index path: {core_index_path} (exists: {core_index_path.exists()}). "
                 "Run 'docstra init' and 'docstra ingest' first."
+                f"{migration_hint}"
             )
             self.console.print(f"[bold red]Error:[/] {error_msg}")
             raise FileNotFoundError(error_msg)
 
         try:
             self.storage = ChromaDBStorage(persist_directory=str(chroma_path))
-            self.retriever = ChromaRetriever(self.storage, self.embedding_generator)
+            self.retriever = ChromaRetriever(
+                self.storage,
+                self.embedding_generator,
+                codebase_root=str(abs_codebase_path),
+            )
             self.code_indexer = CodebaseIndexer(
-                index_directory=str(index_path)
-            )  # Callbacks not typically passed here
+                index_directory=str(index_path),
+                codebase_root=str(abs_codebase_path),
+            )
             code_index_instance = self.code_indexer.get_index()
             if code_index_instance is None:
                 raise ValueError(f"Failed to load code index from {index_path}")
             self.hybrid_retriever = HybridRetriever(self.retriever, code_index_instance)
 
             # Initialize context-aware retriever
-            # Load repository map
             repo_map = None
             try:
                 from docstra.core.indexing.repo_map import RepositoryMap
 
-                repo_map_path = effective_persist_dir / "repo_map.json"
-                if repo_map_path.exists():
-                    # Create a new repository map and rebuild it with current index
-                    repo_map = RepositoryMap(
-                        str(abs_codebase_path), code_index_instance
-                    )
-                    if code_index_instance:
-                        repo_map.build()  # Rebuild with current index
+                repo_map = RepositoryMap(str(abs_codebase_path), code_index_instance)
+                repo_map.build()
             except Exception as e:
                 self.console.print(
-                    f"[yellow]Warning: Could not load repository map: {e}[/yellow]"
+                    f"[yellow]Warning: Could not build repository map: {e}[/yellow]"
                 )
 
             self.context_aware_retriever = ContextAwareRetriever(

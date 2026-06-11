@@ -14,6 +14,7 @@ import chromadb
 from chromadb.types import Metadata
 
 from docstra.core.document_processing.document import Document
+from docstra.core.indexing.model import make_chunk_id, normalize_file_id
 
 ChromaScalar = str | int | float | bool
 ChromaMetadata = Metadata
@@ -393,7 +394,12 @@ class ChromaDBStorage:
 class DocumentIndexer:
     """Index documents in ChromaDB."""
 
-    def __init__(self, storage: ChromaDBStorage, embedding_generator: Any):
+    def __init__(
+        self,
+        storage: ChromaDBStorage,
+        embedding_generator: Any,
+        codebase_root: Optional[str] = None,
+    ):
         """Initialize the document indexer.
 
         Args:
@@ -402,6 +408,7 @@ class DocumentIndexer:
         """
         self.storage = storage
         self.embedding_generator = embedding_generator
+        self.codebase_root = codebase_root
 
     def _prepare_metadata_for_chroma(self, metadata) -> dict:
         """Convert document metadata to ChromaDB-compatible format.
@@ -416,7 +423,13 @@ class DocumentIndexer:
         chroma_metadata = {}
 
         # Convert metadata to dictionary
-        metadata_dict = metadata.dict() if hasattr(metadata, "dict") else metadata
+        metadata_dict = (
+            metadata.model_dump()
+            if hasattr(metadata, "model_dump")
+            else metadata.dict()
+            if hasattr(metadata, "dict")
+            else metadata
+        )
 
         # Process each metadata field
         for key, value in metadata_dict.items():
@@ -460,13 +473,16 @@ class DocumentIndexer:
         """
         # Generate embeddings for the document
         doc_embedding = self.embedding_generator.generate_embedding(document.content)
+        doc_id = normalize_file_id(document.metadata.filepath, self.codebase_root)
 
         # Convert document metadata to ChromaDB-compatible format
         doc_metadata = self._prepare_metadata_for_chroma(document.metadata)
+        doc_metadata["document_id"] = doc_id
+        doc_metadata["filepath"] = doc_id
 
         # Add document to storage
-        doc_id = self.storage.add_document(
-            document_id=document.metadata.filepath,
+        persisted_doc_id = self.storage.add_document(
+            document_id=doc_id,
             content=document.content,
             metadata=doc_metadata,
             embedding=doc_embedding,
@@ -480,9 +496,9 @@ class DocumentIndexer:
             chunk_embeddings = []
 
             # Process each chunk
-            for i, chunk in enumerate(document.chunks):
+            for chunk in document.chunks:
                 # Generate chunk ID
-                chunk_id = f"{doc_id}#{i}"
+                chunk_id = make_chunk_id(doc_id, chunk.start_line, chunk.end_line)
 
                 # Generate chunk embedding
                 chunk_embedding = self.embedding_generator.generate_embedding(
@@ -491,14 +507,14 @@ class DocumentIndexer:
 
                 # Create chunk metadata
                 chunk_metadata = {
-                    "document_id": document.metadata.filepath,
-                    "chunk_index": i,
+                    "document_id": doc_id,
                     "start_line": chunk.start_line,
                     "end_line": chunk.end_line,
                     "chunk_type": chunk.chunk_type,
                     "symbols": chunk.symbols,
                     "parent_symbols": chunk.parent_symbols,
                     "language": str(document.metadata.language),
+                    "filepath": doc_id,
                 }
 
                 # Convert chunk metadata to ChromaDB-compatible format
@@ -521,7 +537,7 @@ class DocumentIndexer:
                     embeddings=chunk_embeddings,
                 )
 
-        return doc_id
+        return persisted_doc_id
 
     def index_documents(self, documents: List[Document]) -> List[str]:
         """Index multiple documents.
