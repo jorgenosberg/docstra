@@ -14,6 +14,7 @@ from rich.table import Table
 
 from docstra.core.config.settings import UserConfig
 from docstra.core.indexing.code_index import CodebaseIndex, CodebaseIndexer
+from docstra.core.indexing.model import CORE_INDEX_FILENAME
 from docstra.core.indexing.repo_map import RepositoryMap
 from docstra.core.utils.colors import Colors
 
@@ -61,22 +62,27 @@ class RepositoryExplorerService:
 
         # Load code index
         index_path = persist_dir / "index"
-        if index_path.exists():
-            indexer = CodebaseIndexer(index_directory=str(index_path))
-            self.code_index = indexer.get_index()
+        core_index_path = index_path / CORE_INDEX_FILENAME
+        legacy_index_artifacts = CodebaseIndex.legacy_artifacts_in(index_path)
+        legacy_repo_map = persist_dir / "repo_map.json"
 
-        # Load repository map
-        map_path = persist_dir / "repo_map.json"
-        if map_path.exists():
-            # Create a new repository map and load from the saved data
-            self.repo_map = RepositoryMap(str(abs_path), self.code_index)
-            if self.code_index:
-                self.repo_map.build()  # Rebuild with current index
-
-        if not self.repo_map or not self.code_index:
+        if not core_index_path.exists():
+            if legacy_index_artifacts or legacy_repo_map.exists():
+                raise ValueError(
+                    "Legacy Docstra index artifacts were found. Run 'docstra ingest' "
+                    "to rebuild the index in the new format."
+                )
             raise ValueError(
                 "Repository not fully indexed. Run 'docstra ingest' first."
             )
+
+        indexer = CodebaseIndexer(
+            index_directory=str(index_path),
+            codebase_root=str(abs_path),
+        )
+        self.code_index = indexer.get_index()
+        self.repo_map = RepositoryMap(str(abs_path), self.code_index)
+        self.repo_map.build()
 
     def get_file_relationships(self, file_path: str) -> Dict[str, Any]:
         """Get comprehensive file relationship information.
@@ -100,7 +106,7 @@ class RepositoryExplorerService:
         dependencies = self.repo_map.get_file_dependencies(file_path)
         related_files = self.repo_map.get_related_files(file_path)
 
-        # Get dependents by finding files that import this one
+        # Get dependents by following resolved import edges
         dependents = self._get_file_dependents(file_path)
 
         # Get symbols from code index
@@ -138,22 +144,7 @@ class RepositoryExplorerService:
         """
         if not self.code_index:
             return []
-
-        dependents: List[str] = []
-        file_metadata = self.code_index.get_file_metadata(file_path)
-        if not file_metadata:
-            return dependents
-
-        # Find files that import symbols from this file
-        for symbol in file_metadata.get("functions", []) + file_metadata.get(
-            "classes", []
-        ):
-            symbol_usages = self.code_index.search_symbol(symbol)
-            for usage in symbol_usages:
-                if usage["filepath"] != file_path:
-                    dependents.append(usage["filepath"])
-
-        return list(set(dependents))  # Remove duplicates
+        return self.code_index.get_dependents(file_path)
 
     def explore_structure(
         self, path: str, depth: int = 3, show_tree: bool = False

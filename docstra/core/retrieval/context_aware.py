@@ -469,7 +469,9 @@ class ContextAwareRetriever:
             # Search for files with relevant names for architectural queries
             concept_keywords = ["cli", "main", "command", "app", "interface", "entry"]
 
-            for file_path, metadata in self.code_index.file_index.items():
+            for indexed_file in self.code_index.iter_files():
+                file_path = indexed_file.id
+                metadata = self.code_index.get_file_metadata(file_path) or {}
                 file_name = file_path.lower()
                 # Check if filename contains relevant concepts
                 for keyword in concept_keywords:
@@ -844,7 +846,7 @@ class ContextAwareRetriever:
             # Add directory structure
             if self.code_index:
                 directories = {}
-                for file_path in self.code_index.file_index.keys():
+                for file_path in self.code_index.iter_file_ids():
                     dir_name = "/".join(file_path.split("/")[:-1])
                     if "core" in dir_name:
                         directories[dir_name] = directories.get(dir_name, 0) + 1
@@ -868,7 +870,7 @@ class ContextAwareRetriever:
         key_files = []
 
         # Look for CLI-related files
-        for file_path in self.code_index.file_index.keys():
+        for file_path in self.code_index.iter_file_ids():
             if any(
                 keyword in file_path.lower()
                 for keyword in ["cli.py", "main.py", "app.py"]

@@ -33,6 +33,10 @@ class DocumentType(str, Enum):
     TEXT = "text"
     OTHER = "other"
 
+    def __str__(self) -> str:
+        """Return the enum value instead of the enum representation."""
+        return self.value
+
 
 class DocumentMetadata(BaseModel):
     """Metadata for a document."""

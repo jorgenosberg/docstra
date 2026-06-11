@@ -9,12 +9,13 @@ from __future__ import annotations
 import os
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import requests
 import tiktoken
 
 from docstra.core.document_processing.document import Document
+from docstra.core.indexing.model import make_chunk_id, normalize_file_id
 
 
 def _vector_to_list(vector: Sequence[float]) -> List[float]:
@@ -270,12 +271,18 @@ class EmbeddingFactory:
 class DocumentEmbedder:
     """Generate embeddings for documents and their chunks."""
 
-    def __init__(self, embedding_generator: EmbeddingGenerator) -> None:
+    def __init__(
+        self,
+        embedding_generator: EmbeddingGenerator,
+        codebase_root: Optional[str] = None,
+    ) -> None:
         """Initialize the document embedder."""
         self.embedding_generator = embedding_generator
+        self.codebase_root = codebase_root
 
     def embed_document(self, document: Document) -> Dict[str, List[float]]:
         """Generate embeddings for a document and its chunks."""
+        doc_id = normalize_file_id(document.metadata.filepath, self.codebase_root)
         doc_embedding = self.embedding_generator.generate_embedding(document.content)
         chunk_embeddings: Dict[str, List[float]] = {}
 
@@ -286,12 +293,9 @@ class DocumentEmbedder:
             )
 
             for i, chunk in enumerate(document.chunks):
-                chunk_id = (
-                    f"{document.metadata.filepath}#{chunk.start_line}-{chunk.end_line}"
-                )
+                chunk_id = make_chunk_id(doc_id, chunk.start_line, chunk.end_line)
                 chunk_embeddings[chunk_id] = chunk_embedding_vectors[i]
 
-        doc_id = document.metadata.filepath
         chunk_embeddings[doc_id] = doc_embedding
 
         return chunk_embeddings
@@ -303,7 +307,7 @@ class DocumentEmbedder:
         embeddings: Dict[str, Dict[str, List[float]]] = {}
 
         for document in documents:
-            doc_id = document.metadata.filepath
+            doc_id = normalize_file_id(document.metadata.filepath, self.codebase_root)
             embeddings[doc_id] = self.embed_document(document)
 
         return embeddings

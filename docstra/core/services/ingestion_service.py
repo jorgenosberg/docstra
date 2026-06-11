@@ -30,8 +30,8 @@ from docstra.core.document_processing.chunking import (
 )
 from docstra.core.ingestion.embeddings import EmbeddingFactory
 from docstra.core.ingestion.storage import ChromaDBStorage, DocumentIndexer
-from docstra.core.indexing.code_index import CodebaseIndexer
-from docstra.core.indexing.repo_map import RepositoryMap
+from docstra.core.indexing.code_index import CodebaseIndex, CodebaseIndexer
+from docstra.core.indexing.model import CORE_INDEX_FILENAME
 from docstra.core.utils.file_collector import collect_files, FileCollector
 
 
@@ -87,10 +87,30 @@ class IngestionService:
             index_dir = persist_directory / "index"
             if index_dir.exists() and index_dir.is_dir():
                 shutil.rmtree(index_dir)
+            legacy_repo_map = persist_directory / "repo_map.json"
+            if legacy_repo_map.exists():
+                legacy_repo_map.unlink()
+
+        index_path = persist_directory / "index"
+        core_index_path = index_path / CORE_INDEX_FILENAME
+        legacy_index_artifacts = CodebaseIndex.legacy_artifacts_in(index_path)
+        legacy_repo_map = persist_directory / "repo_map.json"
+        has_legacy_state = bool(legacy_index_artifacts) or legacy_repo_map.exists()
+
+        if has_legacy_state and not force:
+            self.console.print(
+                "[yellow]Legacy index artifacts detected. Rebuilding the index in the new core manifest format.[/]"
+            )
+            chroma_dir = persist_directory / "chroma"
+            if chroma_dir.exists() and chroma_dir.is_dir():
+                shutil.rmtree(chroma_dir)
+            if index_path.exists() and index_path.is_dir():
+                shutil.rmtree(index_path)
+            if legacy_repo_map.exists():
+                legacy_repo_map.unlink()
 
         # Check if already indexed and not forcing
-        index_path = persist_directory / "index"
-        if index_path.exists() and not force:
+        if core_index_path.exists() and not force:
             self.console.print(
                 "[yellow]Codebase already indexed. Use --force to reindex.[/]"
             )
@@ -128,11 +148,19 @@ class IngestionService:
 
         storage = ChromaDBStorage(persist_directory=str(persist_directory / "chroma"))
 
-        doc_indexer = DocumentIndexer(storage, embedding_generator)
+        doc_indexer = DocumentIndexer(
+            storage,
+            embedding_generator,
+            codebase_root=str(codebase_path_abs),
+        )
 
         code_indexer = CodebaseIndexer(
             index_directory=str(persist_directory / "index"),
             exclude_patterns=exclude_patterns or [],
+            codebase_root=str(codebase_path_abs),
+            embedding_backend="chroma",
+            embedding_model=user_config.embedding.model_name,
+            source_kinds=["tree-sitter"],
         )
 
         # Collect files with suppressed logging
@@ -246,24 +274,6 @@ class IngestionService:
 
             progress.update(
                 task_index, completed=True, description="[green]Indexed all documents"
-            )
-
-            # Create repository map
-            task_map = progress.add_task("[cyan]Creating repository map...", total=None)
-
-            repo_map = RepositoryMap.from_documents(
-                documents, str(codebase_path_abs), code_indexer.index
-            )
-
-            # Save repository map
-            map_path = persist_directory / "repo_map.json"
-            with open(map_path, "w") as f:
-                import json
-
-                json.dump(repo_map.to_dict(), f)
-
-            progress.update(
-                task_map, completed=True, description="[green]Created repository map"
             )
 
         # Show completion summary with embedding usage

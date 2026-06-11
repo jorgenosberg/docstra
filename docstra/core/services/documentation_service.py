@@ -25,6 +25,8 @@ from docstra.core.document_processing.extractor import DocumentProcessor
 from docstra.core.indexing.code_index import (
     CodebaseIndexer,
 )  # For loading index for repo_map
+from docstra.core.indexing.code_index import CodebaseIndex
+from docstra.core.indexing.model import CORE_INDEX_FILENAME
 from docstra.core.indexing.repo_map import RepositoryMap
 from docstra.core.ingestion.embeddings import EmbeddingFactory
 from docstra.core.ingestion.storage import ChromaDBStorage
@@ -231,23 +233,30 @@ class DocumentationService:
 
         repo_map: Optional[RepositoryMap] = None
         chroma_retriever: Optional[ChromaRetriever] = None
-        map_path = abs_persist_directory / "repo_map.json"
         code_indexer_path = abs_persist_directory / "index"
+        core_index_path = code_indexer_path / CORE_INDEX_FILENAME
         chroma_storage_path = abs_persist_directory / "chroma"
+        legacy_index_artifacts = CodebaseIndex.legacy_artifacts_in(code_indexer_path)
+        legacy_repo_map = abs_persist_directory / "repo_map.json"
 
-        if map_path.exists() and code_indexer_path.exists():
+        if not core_index_path.exists() and (
+            legacy_index_artifacts or legacy_repo_map.exists()
+        ):
+            raise ValueError(
+                "Legacy Docstra index artifacts were found. Run 'docstra ingest' "
+                "to rebuild the index in the new format."
+            )
+
+        if core_index_path.exists():
             try:
                 temp_code_index = CodebaseIndexer(
-                    index_directory=str(code_indexer_path)
+                    index_directory=str(code_indexer_path),
+                    codebase_root=str(input_path_abs),
                 ).get_index()
                 if temp_code_index:
-                    # Create repo map from documents instead of loading from dict
-                    repo_map = RepositoryMap.from_documents(
-                        documents_for_generation, str(input_path_abs), temp_code_index
-                    )
-                    self.console.print(
-                        "[dim]Repo map created from documents and index.[/dim]"
-                    )
+                    repo_map = RepositoryMap(str(input_path_abs), temp_code_index)
+                    repo_map.build()
+                    self.console.print("[dim]Repo map created from core index.[/dim]")
             except Exception as e_map:
                 self.console.print(
                     f"[yellow]Warning: Could not load repository map: {e_map}[/yellow]"
@@ -266,6 +275,7 @@ class DocumentationService:
                 chroma_retriever = ChromaRetriever(
                     chroma_db,
                     embedding_gen,
+                    codebase_root=str(input_path_abs),
                 )
                 self.console.print(
                     f"[dim]ChromaRetriever initialized from {chroma_storage_path}.[/dim]"
@@ -277,10 +287,11 @@ class DocumentationService:
 
         # Get code index if available
         code_index = None
-        if abs_persist_directory and (abs_persist_directory / "index").exists():
+        if core_index_path.exists():
             try:
                 indexer = CodebaseIndexer(
-                    index_directory=str(abs_persist_directory / "index")
+                    index_directory=str(abs_persist_directory / "index"),
+                    codebase_root=str(input_path_abs),
                 )
                 code_index = indexer.get_index()
             except Exception as e:
