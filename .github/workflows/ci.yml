@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Sync dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Check lockfile
+        run: uv lock --check
+
+      - name: Lint
+        run: uv run --locked --no-sync ruff check .
+
+      - name: Format check
+        run: uv run --locked --no-sync ruff format --check .
+
+      - name: Type check
+        run: uv run --locked --no-sync ty check
+
+      - name: Test
+        run: uv run --locked --no-sync pytest
+
+      - name: Audit dependencies
+        run: uv audit --locked --ignore-until-fixed GHSA-rrmf-rvhw-rf47

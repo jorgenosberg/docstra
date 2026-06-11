@@ -258,6 +258,9 @@ class DocumentationService:
                 embedding_gen = EmbeddingFactory.create_embedding_generator(
                     embedding_type=self.user_config.embedding.provider,
                     model_name=self.user_config.embedding.model_name,
+                    api_key=self.user_config.embedding.api_key
+                    or self.user_config.model.api_key,
+                    api_base=self.user_config.model.api_base,
                 )
                 chroma_db = ChromaDBStorage(str(chroma_storage_path))
                 chroma_retriever = ChromaRetriever(

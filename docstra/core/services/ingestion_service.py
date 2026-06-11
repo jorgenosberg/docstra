@@ -122,6 +122,8 @@ class IngestionService:
         embedding_generator = EmbeddingFactory.create_embedding_generator(
             embedding_type=user_config.embedding.provider,
             model_name=user_config.embedding.model_name,
+            api_key=user_config.embedding.api_key or user_config.model.api_key,
+            api_base=user_config.model.api_base,
         )
 
         storage = ChromaDBStorage(persist_directory=str(persist_directory / "chroma"))

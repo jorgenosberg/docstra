@@ -7,15 +7,19 @@ Vector embedding generation for code documents.
 from __future__ import annotations
 
 import os
-import tiktoken
+import time
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any
+from typing import Any, Dict, List, Sequence
 
-from langchain_huggingface.embeddings import HuggingFaceEmbeddings
-from langchain_ollama.embeddings import OllamaEmbeddings
-from langchain_openai.embeddings import OpenAIEmbeddings
+import requests
+import tiktoken
 
 from docstra.core.document_processing.document import Document
+
+
+def _vector_to_list(vector: Sequence[float]) -> List[float]:
+    """Convert any embedding-like sequence into a plain float list."""
+    return [float(value) for value in vector]
 
 
 class EmbeddingUsageTracker:
@@ -23,9 +27,9 @@ class EmbeddingUsageTracker:
 
     # OpenAI embedding pricing per 1K tokens (as of 2024)
     OPENAI_EMBEDDING_PRICING = {
-        "text-embedding-3-small": 0.00002,  # $0.00002 per 1K tokens
-        "text-embedding-3-large": 0.00013,  # $0.00013 per 1K tokens
-        "text-embedding-ada-002": 0.0001,  # $0.0001 per 1K tokens
+        "text-embedding-3-small": 0.00002,
+        "text-embedding-3-large": 0.00013,
+        "text-embedding-ada-002": 0.0001,
     }
 
     def __init__(self) -> None:
@@ -36,21 +40,11 @@ class EmbeddingUsageTracker:
         self.usage_history: List[Dict[str, Any]] = []
 
     def _estimate_tokens(self, text: str, model: str = "text-embedding-3-small") -> int:
-        """Estimate token count for text using tiktoken.
-
-        Args:
-            text: Text to estimate tokens for
-            model: Model name for encoding selection
-
-        Returns:
-            Estimated token count
-        """
+        """Estimate token count for text using tiktoken."""
         try:
-            # Use cl100k_base encoding for OpenAI embedding models
             encoding = tiktoken.get_encoding("cl100k_base")
             return len(encoding.encode(text))
         except Exception:
-            # Fallback: rough estimate of 4 characters per token
             return len(text) // 4
 
     def record_usage(
@@ -60,32 +54,18 @@ class EmbeddingUsageTracker:
         texts: List[str],
         request_type: str = "embedding",
     ) -> Dict[str, Any]:
-        """Record embedding usage.
-
-        Args:
-            provider: Embedding provider (openai, huggingface, ollama)
-            model: Model name
-            texts: List of texts that were embedded
-            request_type: Type of request
-
-        Returns:
-            Usage information dictionary
-        """
-        # Calculate token usage
+        """Record embedding usage."""
         total_tokens = sum(self._estimate_tokens(text, model) for text in texts)
 
-        # Calculate cost (only for OpenAI)
         cost = 0.0
         if provider.lower() == "openai":
-            rate = self.OPENAI_EMBEDDING_PRICING.get(model, 0.0001)  # Default rate
+            rate = self.OPENAI_EMBEDDING_PRICING.get(model, 0.0001)
             cost = (total_tokens / 1000) * rate
 
-        # Update totals
         self.total_tokens += total_tokens
         self.total_cost += cost
         self.total_requests += 1
 
-        # Create usage record
         usage_record = {
             "provider": provider,
             "model": model,
@@ -93,18 +73,14 @@ class EmbeddingUsageTracker:
             "cost": cost,
             "num_texts": len(texts),
             "request_type": request_type,
-            "timestamp": __import__("time").time(),
+            "timestamp": time.time(),
         }
 
         self.usage_history.append(usage_record)
         return usage_record
 
     def get_summary(self) -> Dict[str, Any]:
-        """Get usage summary.
-
-        Returns:
-            Summary of usage statistics
-        """
+        """Get usage summary."""
         return {
             "total_tokens": self.total_tokens,
             "total_cost": self.total_cost,
@@ -123,166 +99,147 @@ class EmbeddingGenerator(ABC):
 
     @abstractmethod
     def generate_embedding(self, text: str) -> List[float]:
-        """Generate an embedding for a single text.
-
-        Args:
-            text: The text to generate an embedding for
-
-        Returns:
-            The embedding vector
-        """
-        pass
+        """Generate an embedding for a single text."""
 
     @abstractmethod
     def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for multiple texts.
-
-        Args:
-            texts: The texts to generate embeddings for
-
-        Returns:
-            List of embedding vectors
-        """
-        pass
+        """Generate embeddings for multiple texts."""
 
     def get_usage_summary(self) -> Dict[str, Any]:
-        """Get usage summary for this generator.
-
-        Returns:
-            Usage summary dictionary
-        """
+        """Get usage summary for this generator."""
         return self.usage_tracker.get_summary()
 
 
 class HuggingFaceEmbeddingGenerator(EmbeddingGenerator):
-    """Embedding generator using HuggingFace models."""
+    """Embedding generator using sentence-transformers directly."""
 
     def __init__(
         self, model_name: str = "sentence-transformers/all-mpnet-base-v2"
     ) -> None:
-        """Initialize the HuggingFace embedding generator.
-
-        Args:
-            model_name: Name of the HuggingFace model to use
-        """
         super().__init__()
         self.model_name = model_name
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name=model_name, model_kwargs={"trust_remote_code": True}
+
+        from sentence_transformers import SentenceTransformer
+
+        try:
+            self.model = SentenceTransformer(model_name, trust_remote_code=True)
+        except TypeError:
+            self.model = SentenceTransformer(model_name)
+
+    def _encode(self, texts: List[str]) -> List[List[float]]:
+        embeddings = self.model.encode(
+            texts,
+            convert_to_numpy=True,
+            normalize_embeddings=False,
+            show_progress_bar=False,
         )
+        return [_vector_to_list(vector) for vector in embeddings]
 
     def generate_embedding(self, text: str) -> List[float]:
-        """Generate an embedding for a single text.
-
-        Args:
-            text: The text to generate an embedding for
-
-        Returns:
-            The embedding vector
-        """
-        # Track usage (no cost for HuggingFace local models)
         self.usage_tracker.record_usage("huggingface", self.model_name, [text])
-        return self.embeddings.embed_query(text)
+        return self._encode([text])[0]
 
     def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for multiple texts.
-
-        Args:
-            texts: The texts to generate embeddings for
-
-        Returns:
-            List of embedding vectors
-        """
-        # Track usage (no cost for HuggingFace local models)
         self.usage_tracker.record_usage("huggingface", self.model_name, texts)
-        return self.embeddings.embed_documents(texts)
+        return self._encode(texts)
 
 
 class OpenAIEmbeddingGenerator(EmbeddingGenerator):
-    """Embedding generator using OpenAI embedding models."""
+    """Embedding generator using the OpenAI SDK directly."""
 
-    def __init__(self, model_name: str = "text-embedding-3-small") -> None:
-        """Initialize the OpenAI embedding generator.
-
-        Args:
-            model_name: Name of the OpenAI embedding model to use
-        """
+    def __init__(
+        self,
+        model_name: str = "text-embedding-3-small",
+        api_key: str | None = None,
+        api_base: str | None = None,
+    ) -> None:
         super().__init__()
         self.model_name = model_name
-        # Get API key from environment variable
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
+        resolved_api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        if not resolved_api_key:
             raise ValueError(
-                "OpenAI API key not found. Set OPENAI_API_KEY environment variable."
+                "OpenAI API key not found. Set OPENAI_API_KEY or embedding.api_key."
             )
 
-        self.embeddings = OpenAIEmbeddings(model=model_name)
+        from openai import OpenAI
+
+        self.client = OpenAI(api_key=resolved_api_key, base_url=api_base)
+
+    def _embed(self, texts: List[str]) -> List[List[float]]:
+        response = self.client.embeddings.create(model=self.model_name, input=texts)
+        return [_vector_to_list(item.embedding) for item in response.data]
 
     def generate_embedding(self, text: str) -> List[float]:
-        """Generate an embedding for a single text.
-
-        Args:
-            text: The text to generate an embedding for
-
-        Returns:
-            The embedding vector
-        """
-        # Track usage and cost
         self.usage_tracker.record_usage("openai", self.model_name, [text])
-        return self.embeddings.embed_query(text)
+        return self._embed([text])[0]
 
     def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for multiple texts.
-
-        Args:
-            texts: The texts to generate embeddings for
-
-        Returns:
-            List of embedding vectors
-        """
-        # Track usage and cost
         self.usage_tracker.record_usage("openai", self.model_name, texts)
-        return self.embeddings.embed_documents(texts)
+        return self._embed(texts)
 
 
 class OllamaEmbeddingGenerator(EmbeddingGenerator):
-    """Embedding generator using Ollama models."""
+    """Embedding generator using Ollama's HTTP embedding endpoints."""
 
-    def __init__(self, model_name: str = "llama3.2") -> None:
-        """Initialize the Ollama embedding generator.
-
-        Args:
-            model_name: Name of the Ollama model to use
-        """
+    def __init__(
+        self,
+        model_name: str = "llama3.2",
+        api_base: str | None = None,
+        timeout: float = 30.0,
+    ) -> None:
         super().__init__()
         self.model_name = model_name
-        self.embeddings = OllamaEmbeddings(model=model_name)
+        self.api_base = (api_base or os.environ.get("OLLAMA_API_BASE") or "").rstrip(
+            "/"
+        ) or "http://localhost:11434"
+        self.timeout = timeout
+
+    def _embed_with_current_endpoint(self, texts: List[str]) -> List[List[float]]:
+        payload: Dict[str, Any] = {
+            "model": self.model_name,
+            "input": texts if len(texts) > 1 else texts[0],
+        }
+        response = requests.post(
+            f"{self.api_base}/api/embed",
+            json=payload,
+            timeout=self.timeout,
+        )
+        if response.status_code == 404:
+            raise FileNotFoundError("Ollama /api/embed endpoint is unavailable")
+        response.raise_for_status()
+        data = response.json()
+        if "embeddings" not in data:
+            raise ValueError("Ollama response did not include embeddings")
+        return [_vector_to_list(vector) for vector in data["embeddings"]]
+
+    def _embed_with_legacy_endpoint(self, texts: List[str]) -> List[List[float]]:
+        embeddings: List[List[float]] = []
+        for text in texts:
+            response = requests.post(
+                f"{self.api_base}/api/embeddings",
+                json={"model": self.model_name, "prompt": text},
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            data = response.json()
+            if "embedding" not in data:
+                raise ValueError("Legacy Ollama response did not include an embedding")
+            embeddings.append(_vector_to_list(data["embedding"]))
+        return embeddings
+
+    def _embed(self, texts: List[str]) -> List[List[float]]:
+        try:
+            return self._embed_with_current_endpoint(texts)
+        except FileNotFoundError:
+            return self._embed_with_legacy_endpoint(texts)
 
     def generate_embedding(self, text: str) -> List[float]:
-        """Generate an embedding for a single text.
-
-        Args:
-            text: The text to generate an embedding for
-
-        Returns:
-            The embedding vector
-        """
-        # Track usage (no cost for local Ollama models)
         self.usage_tracker.record_usage("ollama", self.model_name, [text])
-        return self.embeddings.embed_query(text)
+        return self._embed([text])[0]
 
     def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for multiple texts.
-
-        Args:
-            texts: The texts to generate embeddings for
-
-        Returns:
-            List of embedding vectors
-        """
-        # Track usage (no cost for local Ollama models)
         self.usage_tracker.record_usage("ollama", self.model_name, texts)
-        return self.embeddings.embed_documents(texts)
+        return self._embed(texts)
 
 
 class EmbeddingFactory:
@@ -290,55 +247,36 @@ class EmbeddingFactory:
 
     @staticmethod
     def create_embedding_generator(embedding_type: str, **kwargs) -> EmbeddingGenerator:
-        """Create an embedding generator based on type.
-
-        Args:
-            embedding_type: Type of embedding generator to create
-            **kwargs: Additional arguments for the generator
-
-        Returns:
-            An embedding generator
-
-        Raises:
-            ValueError: If the embedding type is not supported
-        """
+        """Create an embedding generator based on type."""
         if embedding_type.lower() == "huggingface":
             model_name = kwargs.get("model_name", "all-MiniLM-L6-v2")
             return HuggingFaceEmbeddingGenerator(model_name=model_name)
-        elif embedding_type.lower() == "openai":
+        if embedding_type.lower() == "openai":
             model_name = kwargs.get("model_name", "text-embedding-3-small")
-            return OpenAIEmbeddingGenerator(model_name=model_name)
-        elif embedding_type.lower() == "ollama":
+            return OpenAIEmbeddingGenerator(
+                model_name=model_name,
+                api_key=kwargs.get("api_key"),
+                api_base=kwargs.get("api_base"),
+            )
+        if embedding_type.lower() == "ollama":
             model_name = kwargs.get("model_name", "llama3.2")
-            return OllamaEmbeddingGenerator(model_name=model_name)
-        else:
-            raise ValueError(f"Unsupported embedding type: {embedding_type}")
+            return OllamaEmbeddingGenerator(
+                model_name=model_name,
+                api_base=kwargs.get("api_base"),
+            )
+        raise ValueError(f"Unsupported embedding type: {embedding_type}")
 
 
 class DocumentEmbedder:
     """Generate embeddings for documents and their chunks."""
 
     def __init__(self, embedding_generator: EmbeddingGenerator) -> None:
-        """Initialize the document embedder.
-
-        Args:
-            embedding_generator: Generator for creating embeddings
-        """
+        """Initialize the document embedder."""
         self.embedding_generator = embedding_generator
 
     def embed_document(self, document: Document) -> Dict[str, List[float]]:
-        """Generate embeddings for a document and its chunks.
-
-        Args:
-            document: The document to embed
-
-        Returns:
-            Dictionary mapping chunk IDs to embeddings
-        """
-        # Generate a document-level embedding
+        """Generate embeddings for a document and its chunks."""
         doc_embedding = self.embedding_generator.generate_embedding(document.content)
-
-        # Generate embeddings for each chunk
         chunk_embeddings: Dict[str, List[float]] = {}
 
         if document.chunks:
@@ -353,7 +291,6 @@ class DocumentEmbedder:
                 )
                 chunk_embeddings[chunk_id] = chunk_embedding_vectors[i]
 
-        # Include the document-level embedding
         doc_id = document.metadata.filepath
         chunk_embeddings[doc_id] = doc_embedding
 
@@ -362,14 +299,7 @@ class DocumentEmbedder:
     def embed_documents(
         self, documents: List[Document]
     ) -> Dict[str, Dict[str, List[float]]]:
-        """Generate embeddings for multiple documents and their chunks.
-
-        Args:
-            documents: The documents to embed
-
-        Returns:
-            Dictionary mapping document IDs to chunk embeddings
-        """
+        """Generate embeddings for multiple documents and their chunks."""
         embeddings: Dict[str, Dict[str, List[float]]] = {}
 
         for document in documents:

@@ -32,8 +32,6 @@ def _get_llm_client_for_service(
     """
     provider = config.model.provider
 
-    # Currently only AnthropicClient and OpenAIClient support callbacks
-    # So we need to handle each case separately
     if provider == ModelProvider.ANTHROPIC:
         return AnthropicClient(
             model_name=config.model.model_name,
@@ -49,7 +47,6 @@ def _get_llm_client_for_service(
             temperature=config.model.temperature,
         )
     elif provider == ModelProvider.OLLAMA:
-        # Ollama client doesn't support callbacks, so we just create without them
         return OllamaClient(
             model_name=config.model.model_name,
             api_base=config.model.api_base or "http://localhost:11434",
@@ -58,14 +55,12 @@ def _get_llm_client_for_service(
             validate_connection=False,  # Don't validate during service creation
         )
     elif provider == ModelProvider.LOCAL:
-        # Local client may not support callbacks either
         return LocalModelClient(
             model_name=config.model.model_name,
             model_path=config.model.model_path,
             max_tokens=config.model.max_tokens,
             temperature=config.model.temperature,
             device=config.model.device,
-            # callbacks parameter removed
         )
     else:
         raise ValueError(f"Unsupported model provider: {provider}")
@@ -84,12 +79,15 @@ class QueryService:
     ):
         self.user_config = user_config
         self.console = console if console else Console()
-        self.callbacks = callbacks  # Callbacks list, potentially including DocstraStatsCallbackHandler
+        self.callbacks = callbacks
 
         self.llm_client = _get_llm_client_for_service(self.user_config, self.callbacks)
         self.embedding_generator = EmbeddingFactory.create_embedding_generator(
             embedding_type=self.user_config.embedding.provider,
             model_name=self.user_config.embedding.model_name,
+            api_key=self.user_config.embedding.api_key
+            or self.user_config.model.api_key,
+            api_base=self.user_config.model.api_base,
         )
 
         self.storage: Optional[ChromaDBStorage] = None

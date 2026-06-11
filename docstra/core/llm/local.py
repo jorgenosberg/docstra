@@ -7,7 +7,7 @@ Local model integration for LLM interactions using transformers.
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, cast
 
 try:
     import torch
@@ -34,7 +34,7 @@ from docstra.core.tracking.llm_tracker import (
 class KeywordsStoppingCriteria(StoppingCriteria):
     """Stopping criteria based on keywords."""
 
-    def __init__(self, keywords, tokenizer):
+    def __init__(self, keywords: List[str], tokenizer: Any):
         self.keywords = keywords
         self.tokenizer = tokenizer
         # Pre-encode keywords for efficiency
@@ -98,11 +98,11 @@ class LocalModelClient:
         print(f"Loading model {self.model_path} on {self.device}...")
 
         try:
-            self.tokenizer = AutoTokenizer.from_pretrained(
+            self.tokenizer: Any = AutoTokenizer.from_pretrained(
                 self.model_path, trust_remote_code=True
             )
 
-            self.model = AutoModelForCausalLM.from_pretrained(
+            self.model: Any = AutoModelForCausalLM.from_pretrained(
                 self.model_path,
                 device_map=self.device,
                 torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
@@ -139,7 +139,7 @@ class LocalModelClient:
 
         try:
             # Tokenize the prompt
-            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+            inputs: Any = self.tokenizer(prompt, return_tensors="pt").to(self.device)
 
             # Setup stopping criteria
             stopping_criteria = StoppingCriteriaList(
@@ -190,8 +190,11 @@ class LocalModelClient:
                 )
 
                 # Decode the generated tokens
-                output_text = self.tokenizer.decode(
-                    outputs[0][inputs.input_ids.shape[1] :], skip_special_tokens=True
+                output_text = str(
+                    self.tokenizer.decode(
+                        outputs[0][inputs.input_ids.shape[1] :],
+                        skip_special_tokens=True,
+                    )
                 )
 
             # Track usage if enabled
@@ -202,7 +205,10 @@ class LocalModelClient:
                 # For local models, we can get exact token counts
                 input_tokens = inputs.input_ids.shape[1]
                 output_tokens = len(
-                    self.tokenizer.encode(output_text, add_special_tokens=False)
+                    cast(
+                        List[int],
+                        self.tokenizer.encode(output_text, add_special_tokens=False),
+                    )
                 )
 
                 self.tracker.track_llm_call(
