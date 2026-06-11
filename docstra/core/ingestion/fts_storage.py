@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from docstra.core.indexing.model import IndexedSymbol
@@ -136,4 +135,24 @@ class FtsStorage:
         params.append(n_results)
         return [dict(row) for row in self._conn.execute(sql, params).fetchall()]
 
-    # --- symbols (filled in Task 2b) ---
+    # --- symbols ---
+
+    def add_symbols(self, symbols: List[IndexedSymbol]) -> None:
+        rows = [
+            (symbol.id, symbol.file_id, symbol.kind, symbol.name) for symbol in symbols
+        ]
+        with self._conn:
+            self._conn.executemany(
+                "INSERT INTO symbols_fts (symbol_id, file_id, kind, name) VALUES (?, ?, ?, ?)",
+                rows,
+            )
+
+    def search_symbols(self, query: str, n_results: int = 25) -> List[Dict[str, Any]]:
+        sql = """
+            SELECT symbol_id, file_id, kind, name, -bm25(symbols_fts) AS score
+            FROM symbols_fts
+            WHERE symbols_fts MATCH ?
+            ORDER BY score DESC
+            LIMIT ?
+        """
+        return [dict(row) for row in self._conn.execute(sql, (query, n_results)).fetchall()]

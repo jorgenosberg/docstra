@@ -61,3 +61,49 @@ def test_search_supports_language_filter(tmp_path: Path):
     _add_chunk(store, chunk_id="b.ts#L1-L1", file_id="b.ts", language="typescript", content="foo bar")
     hits = store.search_chunks("foo", n_results=5, language="python")
     assert {h["file_id"] for h in hits} == {"a.py"}
+
+
+def test_add_and_search_symbols(tmp_path: Path):
+    from docstra.core.indexing.model import IndexedSymbol
+
+    store = FtsStorage(str(tmp_path / "index.db"))
+    store.add_symbols([
+        IndexedSymbol(
+            id="repo/file.py::function::make_chunk_id::L67",
+            file_id="repo/file.py",
+            name="make_chunk_id",
+            kind="function",
+            language="python",
+            line=67,
+        ),
+        IndexedSymbol(
+            id="repo/other.py::class::CoreIndexBuilder::L194",
+            file_id="repo/other.py",
+            name="CoreIndexBuilder",
+            kind="class",
+            language="python",
+            line=194,
+        ),
+    ])
+    hits = store.search_symbols("CoreIndexBuilder", n_results=5)
+    assert len(hits) == 1
+    assert hits[0]["name"] == "CoreIndexBuilder"
+    assert hits[0]["file_id"] == "repo/other.py"
+
+
+def test_delete_by_file_removes_symbols(tmp_path: Path):
+    from docstra.core.indexing.model import IndexedSymbol
+
+    store = FtsStorage(str(tmp_path / "index.db"))
+    store.add_symbols([
+        IndexedSymbol(
+            id="x.py::function::foo::L1",
+            file_id="x.py",
+            name="foo",
+            kind="function",
+            language="python",
+            line=1,
+        )
+    ])
+    store.delete_by_file("x.py")
+    assert store.search_symbols("foo", n_results=5) == []
