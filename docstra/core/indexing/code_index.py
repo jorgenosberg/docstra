@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections import defaultdict
 import os
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, TypeVar, Union
 
 from docstra.core.document_processing.document import Document, DocumentType
 from docstra.core.indexing.model import (
@@ -454,6 +454,21 @@ class CodebaseIndex:
 
         related_files.discard(file_id)
         return sorted(related_files)
+
+    def chunks_for_file(self, file_id: str) -> List[Tuple[str, int, int]]:
+        """Return (chunk_id, start_line, end_line) tuples for a file in line order."""
+        matching = [
+            (chunk.id, chunk.start_line, chunk.end_line)
+            for chunk in self._manifest.chunks
+            if chunk.file_id == file_id
+        ]
+        matching.sort(key=lambda tup: tup[1])
+        return matching
+
+    def file_language(self, file_id: str) -> Optional[str]:
+        """Return the language recorded in the manifest for a file id, if any."""
+        entry = self._files_by_id.get(file_id)
+        return entry.language if entry else None
 
     def clear(self) -> None:
         """Clear the persisted manifest and in-memory lookups."""
