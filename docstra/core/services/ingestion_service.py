@@ -112,6 +112,9 @@ class IngestionService:
                 shutil.rmtree(index_path)
             if legacy_repo_map.exists():
                 legacy_repo_map.unlink()
+            index_db_path = persist_directory / "index.db"
+            if index_db_path.exists():
+                index_db_path.unlink()
 
         # Check if already indexed and not forcing
         if core_index_path.exists() and not force:
