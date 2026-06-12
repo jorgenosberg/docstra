@@ -117,6 +117,7 @@ class DocumentationGenerator:
         documentation_depth: str = "comprehensive",  # "overview", "standard", "comprehensive"
         style_guide: Optional[str] = None,
         persist_directory: Optional[Union[str, Path]] = None,
+        user_config: Optional[Any] = None,
     ):
         """Initialize the enhanced documentation generator.
 
@@ -133,6 +134,7 @@ class DocumentationGenerator:
             documentation_depth: Level of documentation detail to generate
             style_guide: Custom style guide for documentation
             persist_directory: Persist directory root (needed to locate index.db for FTS)
+            user_config: UserConfig instance for retrieval settings
         """
         self.llm_client = llm_client
         self.output_dir = Path(output_dir)
@@ -154,11 +156,18 @@ class DocumentationGenerator:
         if self.chroma_retriever and self.code_index and persist_directory:
             fts_storage = FtsStorage(str(Path(persist_directory) / "index.db"))
             fts_retriever = FtsRetriever(fts_storage)
-            self.fusion_retriever = FusionRetriever(
-                dense=self.chroma_retriever,
-                fts=fts_retriever,
-                code_index=self.code_index,
-            )
+            kwargs = {
+                "dense": self.chroma_retriever,
+                "fts": fts_retriever,
+                "code_index": self.code_index,
+            }
+            if user_config and hasattr(user_config, 'retrieval'):
+                kwargs.update({
+                    "rrf_k": user_config.retrieval.rrf_k,
+                    "fts_chunks_top_k": user_config.retrieval.fts_chunks_top_k,
+                    "fts_symbols_top_k": user_config.retrieval.fts_symbols_top_k,
+                })
+            self.fusion_retriever = FusionRetriever(**kwargs)
 
         # Documentation state
         self.processed_documents: Dict[str, Document] = {}
@@ -762,7 +771,7 @@ class DocumentationGenerator:
 
     def _get_file_cross_references(self, document: Document) -> List[str]:
         """Get cross-references for a file."""
-        if not self.fusion_retriever or not self.chroma_retriever:
+        if not self.chroma_retriever:
             return []
 
         try:
