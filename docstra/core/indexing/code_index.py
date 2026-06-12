@@ -567,3 +567,7 @@ class CodebaseIndexer:
     def get_index(self) -> CodebaseIndex:
         """Get the underlying codebase index."""
         return self.index
+
+    def get_manifest(self) -> CoreIndexManifest:
+        """Return the in-memory manifest built during indexing."""
+        return self.index.manifest

@@ -29,6 +29,7 @@ from docstra.core.document_processing.chunking import (
     SyntaxAwareChunking,
 )
 from docstra.core.ingestion.embeddings import EmbeddingFactory
+from docstra.core.ingestion.fts_storage import FtsStorage
 from docstra.core.ingestion.storage import ChromaDBStorage, DocumentIndexer
 from docstra.core.indexing.code_index import CodebaseIndex, CodebaseIndexer
 from docstra.core.indexing.model import CORE_INDEX_FILENAME
@@ -90,6 +91,9 @@ class IngestionService:
             legacy_repo_map = persist_directory / "repo_map.json"
             if legacy_repo_map.exists():
                 legacy_repo_map.unlink()
+            index_db_path = persist_directory / "index.db"
+            if index_db_path.exists():
+                index_db_path.unlink()
 
         index_path = persist_directory / "index"
         core_index_path = index_path / CORE_INDEX_FILENAME
@@ -147,11 +151,13 @@ class IngestionService:
         )
 
         storage = ChromaDBStorage(persist_directory=str(persist_directory / "chroma"))
+        fts_storage = FtsStorage(str(persist_directory / "index.db"))
 
         doc_indexer = DocumentIndexer(
             storage,
             embedding_generator,
             codebase_root=str(codebase_path_abs),
+            fts_storage=fts_storage,
         )
 
         code_indexer = CodebaseIndexer(
@@ -271,6 +277,9 @@ class IngestionService:
 
             doc_indexer.index_documents(documents)
             code_indexer.index_documents(documents)
+
+            manifest = code_indexer.get_manifest()
+            fts_storage.add_symbols(list(manifest.symbols))
 
             progress.update(
                 task_index, completed=True, description="[green]Indexed all documents"

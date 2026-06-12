@@ -15,6 +15,7 @@ from chromadb.types import Metadata
 
 from docstra.core.document_processing.document import Document
 from docstra.core.indexing.model import make_chunk_id, normalize_file_id
+from docstra.core.ingestion.fts_storage import FtsStorage
 
 ChromaScalar = str | int | float | bool
 ChromaMetadata = Metadata
@@ -399,16 +400,20 @@ class DocumentIndexer:
         storage: ChromaDBStorage,
         embedding_generator: Any,
         codebase_root: Optional[str] = None,
+        fts_storage: Optional[FtsStorage] = None,
     ):
         """Initialize the document indexer.
 
         Args:
             storage: ChromaDB storage
             embedding_generator: Generator for creating embeddings
+            codebase_root: Root directory of the codebase
+            fts_storage: Optional FTS store for lexical retrieval
         """
         self.storage = storage
         self.embedding_generator = embedding_generator
         self.codebase_root = codebase_root
+        self.fts_storage = fts_storage
 
     def _prepare_metadata_for_chroma(self, metadata) -> dict:
         """Convert document metadata to ChromaDB-compatible format.
@@ -536,6 +541,17 @@ class DocumentIndexer:
                     metadatas=chunk_metadatas,
                     embeddings=chunk_embeddings,
                 )
+
+                if self.fts_storage is not None:
+                    self.fts_storage.delete_by_file(doc_id)
+                    self.fts_storage.add_chunks(
+                        chunk_ids=chunk_ids,
+                        file_ids=[doc_id] * len(chunk_ids),
+                        languages=[str(document.metadata.language)] * len(chunk_ids),
+                        start_lines=[chunk.start_line for chunk in document.chunks],
+                        end_lines=[chunk.end_line for chunk in document.chunks],
+                        contents=chunk_contents,
+                    )
 
         return persisted_doc_id
 
