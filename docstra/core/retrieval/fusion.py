@@ -76,7 +76,106 @@ class FusionRetriever:
     def retrieve_code_examples(
         self, query: str, n_results: int = 10, languages: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
-        raise NotImplementedError("retrieve_code_examples is moved over in Task 7")
+        """Retrieve chunks that are good examples of the queried concept.
+
+        Args:
+            query: Query string
+            n_results: Number of results to return
+            languages: Optional list of languages to filter by
+
+        Returns:
+            List of example chunks
+        """
+        # Start with basic vector search
+        filters = {}
+        if languages:
+            # We'll retrieve for each language separately
+            all_results = []
+            for language in languages:
+                results = self.retrieve_by_language(
+                    query=query,
+                    language=language,
+                    n_results=max(n_results // len(languages), 1),
+                )
+                all_results.extend(results)
+
+            vector_results = all_results
+        else:
+            vector_results = self.retrieve_chunks(
+                query=query,
+                n_results=n_results * 2,  # Get more for filtering
+                **filters,
+            )
+
+        # Filter for chunks that are likely to be good examples
+        # - Prefer complete functions/methods
+        # - Prefer moderately sized chunks (not too short, not too long)
+        # - Prefer chunks with meaningful names
+        good_examples = []
+
+        for chunk in vector_results:
+            chunk_type = chunk["metadata"].get("chunk_type", "")
+            content = chunk["content"]
+
+            # Score the chunk as an example
+            example_score = 0.0
+
+            # Prefer functions/methods
+            if chunk_type in ["function", "method"]:
+                example_score += 1.0
+
+            # Check content length (not too short, not too long)
+            lines = content.count("\n") + 1
+            if 5 <= lines <= 50:
+                example_score += 0.5
+
+            # Look for meaningful names (more than 3 characters, not generic)
+            symbols = chunk["metadata"].get("symbols", [])
+            generic_symbols = [
+                "main",
+                "init",
+                "test",
+                "get",
+                "set",
+                "run",
+                "func",
+                "foo",
+                "bar",
+            ]
+
+            for symbol in symbols:
+                if len(symbol) > 3 and symbol.lower() not in generic_symbols:
+                    example_score += 0.3
+                    break
+
+            # Use original vector score
+            vector_score = chunk.get("score", 0)
+            if vector_score is not None:
+                # Combine scores (vector score is typically a distance, so lower is better)
+                combined_score = example_score - vector_score
+            else:
+                combined_score = example_score
+
+            chunk_id = self._chunk_id(chunk)
+            good_examples.append(
+                {
+                    "chunk_id": chunk_id,
+                    "id": chunk_id,
+                    "content": content,
+                    "metadata": chunk["metadata"],
+                    "score": combined_score,
+                    "original_score": vector_score,
+                }
+            )
+
+        # Sort by combined score and return top results
+        sorted_examples = sorted(
+            good_examples,
+            key=lambda x: x.get("score", 0),
+            reverse=True,  # Higher score is better
+        )
+
+        return sorted_examples[:n_results]
 
     def _chunk_id(self, hit: Dict[str, Any]) -> Optional[str]:
         return hit.get("chunk_id") or hit.get("id")

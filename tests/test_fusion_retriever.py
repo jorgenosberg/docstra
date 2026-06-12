@@ -154,3 +154,26 @@ def test_empty_lexical_source_does_not_break_fusion():
     )
     hits = fusion.retrieve_chunks("anything", n_results=5)
     assert [h["chunk_id"] for h in hits] == ["repo/a.py#L1-L10"]
+
+
+def test_retrieve_code_examples_prefers_function_chunks():
+    func_chunk = _chunk("repo/a.py#L1-L20", "repo/a.py")
+    func_chunk["metadata"]["chunk_type"] = "function"
+    func_chunk["content"] = "def good():\n" + "    pass\n" * 10  # 11 lines
+    tiny_chunk = _chunk("repo/b.py#L1-L2", "repo/b.py")
+    tiny_chunk["metadata"]["chunk_type"] = "other"
+    tiny_chunk["content"] = "x = 1\n"
+
+    dense = _FakeDense([tiny_chunk, func_chunk])
+    fts = _FakeFts(chunks=[], symbols=[])
+
+    fusion = FusionRetriever(
+        dense=dense,
+        fts=fts,
+        code_index=_fake_code_index({}),
+        rrf_k=60,
+        fts_chunks_top_k=10,
+        fts_symbols_top_k=10,
+    )
+    examples = fusion.retrieve_code_examples("anything", n_results=2)
+    assert examples[0]["chunk_id"] == "repo/a.py#L1-L20"

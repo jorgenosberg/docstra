@@ -28,7 +28,9 @@ from rich.table import Table
 from docstra.core.document_processing.document import Document
 from docstra.core.indexing.repo_map import RepositoryMap
 from docstra.core.retrieval.chroma import ChromaRetriever
-from docstra.core.retrieval.hybrid import HybridRetriever
+from docstra.core.ingestion.fts_storage import FtsStorage
+from docstra.core.retrieval.fts import FtsRetriever
+from docstra.core.retrieval.fusion import FusionRetriever
 from docstra.core.indexing.code_index import CodebaseIndex
 from docstra.core.documentation.prompts import (
     EnhancedDocumentationPrompts,
@@ -114,6 +116,7 @@ class DocumentationGenerator:
         max_workers: Optional[int] = None,
         documentation_depth: str = "comprehensive",  # "overview", "standard", "comprehensive"
         style_guide: Optional[str] = None,
+        persist_directory: Optional[Union[str, Path]] = None,
     ):
         """Initialize the enhanced documentation generator.
 
@@ -129,6 +132,7 @@ class DocumentationGenerator:
             max_workers: Maximum number of worker threads
             documentation_depth: Level of documentation detail to generate
             style_guide: Custom style guide for documentation
+            persist_directory: Persist directory root (needed to locate index.db for FTS)
         """
         self.llm_client = llm_client
         self.output_dir = Path(output_dir)
@@ -145,11 +149,15 @@ class DocumentationGenerator:
         # Enhanced progress reporting
         self.progress_reporter = DocumentationProgressReporter(self.console)
 
-        # Set up hybrid retriever if available
-        self.hybrid_retriever = None
-        if self.chroma_retriever and self.code_index:
-            self.hybrid_retriever = HybridRetriever(
-                self.chroma_retriever, self.code_index
+        # Set up fusion retriever if chroma retriever, code index, and persist dir are available
+        self.fusion_retriever = None
+        if self.chroma_retriever and self.code_index and persist_directory:
+            fts_storage = FtsStorage(str(Path(persist_directory) / "index.db"))
+            fts_retriever = FtsRetriever(fts_storage)
+            self.fusion_retriever = FusionRetriever(
+                dense=self.chroma_retriever,
+                fts=fts_retriever,
+                code_index=self.code_index,
             )
 
         # Documentation state
@@ -695,7 +703,7 @@ class DocumentationGenerator:
                 )
 
         # Add cross-references
-        if self.hybrid_retriever:
+        if self.fusion_retriever:
             cross_refs = self._get_file_cross_references(document)
             if cross_refs:
                 context_parts.append(
@@ -754,7 +762,7 @@ class DocumentationGenerator:
 
     def _get_file_cross_references(self, document: Document) -> List[str]:
         """Get cross-references for a file."""
-        if not self.hybrid_retriever or not self.chroma_retriever:
+        if not self.fusion_retriever or not self.chroma_retriever:
             return []
 
         try:

@@ -11,7 +11,7 @@ from enum import Enum
 from docstra.core.indexing.code_index import CodebaseIndex
 from docstra.core.indexing.repo_map import RepositoryMap
 from docstra.core.retrieval.chroma import ChromaRetriever
-from docstra.core.retrieval.hybrid import HybridRetriever
+from docstra.core.retrieval.fusion import FusionRetriever
 from docstra.core.utils.token_counter import ContextBudgetManager
 
 
@@ -73,11 +73,11 @@ class ContextAwareRetriever:
         self.code_index = code_index
         self.repo_map = repo_map
 
-        # Create hybrid retriever if code index available
-        if code_index:
-            self.hybrid_retriever = HybridRetriever(base_retriever, code_index)
+        # Accept a FusionRetriever if one was passed in (normal path via query_service)
+        if hasattr(base_retriever, "retrieve_code_examples"):
+            self.fusion_retriever = base_retriever
         else:
-            self.hybrid_retriever = None
+            self.fusion_retriever = None
 
     def retrieve_with_budget(
         self, query: str, context_type: str = "query", **kwargs: Any
@@ -383,12 +383,11 @@ class ContextAwareRetriever:
     ) -> Dict[str, Any]:
         """Get balanced general context for queries without clear intent."""
 
-        # Use hybrid retrieval if available, otherwise fall back to base retriever
-        if self.hybrid_retriever:
-            results = self.hybrid_retriever.retrieve(
+        # Use fusion retrieval if available, otherwise fall back to base retriever
+        if self.fusion_retriever:
+            results = self.fusion_retriever.retrieve(
                 query=query,
                 n_results=10,  # Get more initially for filtering
-                use_code_context=True,
             )
         else:
             results = self.base_retriever.retrieve_chunks(query=query, n_results=8)
@@ -571,12 +570,12 @@ class ContextAwareRetriever:
     ) -> Optional[str]:
         """Get targeted code samples based on query analysis."""
 
-        if not self.hybrid_retriever:
+        if not self.fusion_retriever:
             return None
 
         # Get code examples using hybrid retrieval
         try:
-            examples = self.hybrid_retriever.retrieve_code_examples(
+            examples = self.fusion_retriever.retrieve_code_examples(
                 query=query, n_results=3
             )
 

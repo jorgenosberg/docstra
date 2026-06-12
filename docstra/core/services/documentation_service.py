@@ -314,6 +314,7 @@ class DocumentationService:
             max_workers=effective_max_workers,
             documentation_depth="comprehensive",
             style_guide=effective_llm_style_prompt,
+            persist_directory=abs_persist_directory,
         )
 
         self.console.print(
