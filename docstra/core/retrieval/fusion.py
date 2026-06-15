@@ -149,25 +149,17 @@ class FusionRetriever:
                     example_score += 0.3
                     break
 
-            # Use original vector score
-            vector_score = chunk.get("score", 0)
-            if vector_score is not None:
-                # Combine scores (vector score is typically a distance, so lower is better)
-                combined_score = example_score - vector_score
-            else:
-                combined_score = example_score
-
             chunk_id = self._chunk_id(chunk)
-            good_examples.append(
-                {
-                    "chunk_id": chunk_id,
-                    "id": chunk_id,
-                    "content": content,
-                    "metadata": chunk["metadata"],
-                    "score": combined_score,
-                    "original_score": vector_score,
-                }
-            )
+            if example_score > 0:
+                good_examples.append(
+                    {
+                        "chunk_id": chunk_id,
+                        "id": chunk_id,
+                        "content": content,
+                        "metadata": chunk["metadata"],
+                        "score": example_score,
+                    }
+                )
 
         # Sort by combined score and return top results
         sorted_examples = sorted(
