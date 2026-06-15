@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from docstra.core.ingestion.fts_storage import FtsStorage
+from docstra.core.ingestion.fts_storage import FtsStorage, _sanitize_fts_query
 
 
 def _add_chunk(store: FtsStorage, **overrides):
@@ -46,6 +46,8 @@ def test_add_and_search_chunks(tmp_path: Path):
     assert hits[0]["start_line"] == 1
     assert hits[0]["end_line"] == 10
     assert "make_chunk_id" in hits[0]["content"]
+    # Shape contract: metadata sub-dict must be present and document_id must match file_id.
+    assert hits[0]["metadata"]["document_id"] == hits[0]["file_id"]
 
 
 def test_delete_by_file_removes_chunks_and_fts(tmp_path: Path):
@@ -89,6 +91,9 @@ def test_add_and_search_symbols(tmp_path: Path):
     assert len(hits) == 1
     assert hits[0]["name"] == "CoreIndexBuilder"
     assert hits[0]["file_id"] == "repo/other.py"
+    assert hits[0]["id"] == hits[0]["symbol_id"]
+    assert hits[0]["metadata"]["document_id"] == hits[0]["file_id"]
+    assert hits[0]["metadata"]["name"] == "CoreIndexBuilder"
 
 
 def test_delete_by_file_removes_symbols(tmp_path: Path):
@@ -107,3 +112,37 @@ def test_delete_by_file_removes_symbols(tmp_path: Path):
     ])
     store.delete_by_file("x.py")
     assert store.search_symbols("foo", n_results=5) == []
+
+
+def test_sanitize_fts_query_strips_special_chars():
+    assert _sanitize_fts_query("What is the config?") == "what is the config"
+    assert _sanitize_fts_query("(foo OR bar)") == "foo or bar"
+    assert _sanitize_fts_query('search "exact phrase"') == "search exact phrase"
+    assert _sanitize_fts_query("a*b") == "a b"
+    assert _sanitize_fts_query("") == ""
+    assert _sanitize_fts_query("???") == ""
+
+
+def test_punctuation_query_does_not_raise(tmp_path: Path):
+    store = FtsStorage(str(tmp_path / "index.db"))
+    _add_chunk(store)
+    # FTS5 would raise sqlite3.OperationalError without sanitization.
+    hits = store.search_chunks("What is the config?", n_results=5)
+    assert isinstance(hits, list)
+
+
+def test_empty_query_returns_empty_list(tmp_path: Path):
+    store = FtsStorage(str(tmp_path / "index.db"))
+    _add_chunk(store)
+    assert store.search_chunks("???", n_results=5) == []
+    assert store.search_symbols("???", n_results=5) == []
+
+
+def test_query_with_reserved_words_does_not_raise(tmp_path: Path):
+    """A natural-language query starting with NOT/AND/OR must not crash FTS5."""
+    store = FtsStorage(str(tmp_path / "index.db"))
+    _add_chunk(store, content="def handle_not_null(value): pass")
+    # Each of these would otherwise be parsed as a FTS5 boolean expression.
+    for query in ("NOT null handling", "OR operator", "AND something", "foo AND"):
+        # Must not raise; result can be empty or have hits — we only care about no crash.
+        store.search_chunks(query, n_results=5)

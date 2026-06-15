@@ -3,10 +3,26 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from typing import Any, Dict, List, Optional, Sequence
 
 from docstra.core.indexing.model import IndexedSymbol
+
+_FTS_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def _sanitize_fts_query(query: str) -> str:
+    """Strip FTS5 syntax characters and lowercase the result.
+
+    Tokenizes on word boundaries, joins with spaces, lowercases. The
+    lowercasing matters: FTS5 boolean operators (NOT/AND/OR) are recognized
+    only in uppercase, so lowercasing user queries prevents accidental
+    boolean parsing while leaving the unicode61 tokenizer's case-insensitive
+    matching unchanged.
+    """
+    tokens = _FTS_TOKEN_RE.findall(query)
+    return " ".join(tokens).lower()
 
 SCHEMA_VERSION = 1
 
@@ -114,8 +130,11 @@ class FtsStorage:
     def search_chunks(
         self, query: str, n_results: int = 50, *, language: Optional[str] = None, file_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
+        match_query = _sanitize_fts_query(query)
+        if not match_query:
+            return []
         clauses = ["chunks_fts MATCH ?"]
-        params: List[Any] = [query]
+        params: List[Any] = [match_query]
         if language is not None:
             clauses.append("chunks.language = ?")
             params.append(language)
@@ -133,7 +152,27 @@ class FtsStorage:
             LIMIT ?
         """
         params.append(n_results)
-        return [dict(row) for row in self._conn.execute(sql, params).fetchall()]
+        results = []
+        for row in self._conn.execute(sql, params).fetchall():
+            results.append({
+                "id": row["chunk_id"],
+                "chunk_id": row["chunk_id"],
+                "file_id": row["file_id"],
+                "language": row["language"],
+                "start_line": row["start_line"],
+                "end_line": row["end_line"],
+                "content": row["content"],
+                "score": row["score"],
+                "metadata": {
+                    "document_id": row["file_id"],
+                    "filepath": row["file_id"],
+                    "start_line": row["start_line"],
+                    "end_line": row["end_line"],
+                    "language": row["language"],
+                    "chunk_type": "code",
+                },
+            })
+        return results
 
     # --- symbols ---
 
@@ -148,6 +187,9 @@ class FtsStorage:
             )
 
     def search_symbols(self, query: str, n_results: int = 25) -> List[Dict[str, Any]]:
+        match_query = _sanitize_fts_query(query)
+        if not match_query:
+            return []
         sql = """
             SELECT symbol_id, file_id, kind, name, -bm25(symbols_fts) AS score
             FROM symbols_fts
@@ -155,4 +197,20 @@ class FtsStorage:
             ORDER BY score DESC
             LIMIT ?
         """
-        return [dict(row) for row in self._conn.execute(sql, (query, n_results)).fetchall()]
+        results = []
+        for row in self._conn.execute(sql, (match_query, n_results)).fetchall():
+            results.append({
+                "id": row["symbol_id"],
+                "symbol_id": row["symbol_id"],
+                "file_id": row["file_id"],
+                "kind": row["kind"],
+                "name": row["name"],
+                "score": row["score"],
+                "metadata": {
+                    "document_id": row["file_id"],
+                    "filepath": row["file_id"],
+                    "name": row["name"],
+                    "kind": row["kind"],
+                },
+            })
+        return results

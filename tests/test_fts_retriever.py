@@ -21,6 +21,7 @@ def test_retrieve_chunks_delegates_to_storage(tmp_path: Path):
     hits = retriever.retrieve_chunks("make_chunk_id", n_results=5)
     assert len(hits) == 1
     assert hits[0]["chunk_id"] == "repo/file.py#L1-L10"
+    assert hits[0]["metadata"]["document_id"] == hits[0]["file_id"]
 
 
 def test_retrieve_symbols_delegates_to_storage(tmp_path: Path):
@@ -39,3 +40,4 @@ def test_retrieve_symbols_delegates_to_storage(tmp_path: Path):
     hits = retriever.retrieve_symbols("foo", n_results=5)
     assert len(hits) == 1
     assert hits[0]["name"] == "foo"
+    assert hits[0]["metadata"]["document_id"] == "x.py"

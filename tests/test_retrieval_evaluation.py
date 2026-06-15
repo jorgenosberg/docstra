@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import struct
 import sys
 from importlib import util
 from pathlib import Path
@@ -245,15 +247,12 @@ _EVAL_CASES = [
 
 
 class _DummyEmbedder:
-    """Returns a deterministic 3-d embedding so Chroma is happy without a real model."""
+    """Returns a deterministic 8-d embedding so Chroma is happy without a real model."""
 
     def generate_embedding(self, text: str) -> List[float]:
-        # Simple hash-based spread so different files get different vectors.
-        h = hash(text[:64]) & 0xFFFFFF
-        a = ((h >> 16) & 0xFF) / 255.0
-        b = ((h >> 8) & 0xFF) / 255.0
-        c = (h & 0xFF) / 255.0
-        return [a, b, c]
+        digest = hashlib.sha256(text.encode("utf-8")).digest()
+        vals = struct.unpack(">8I", digest[:32])
+        return [v / 0xFFFFFFFF for v in vals]
 
 
 def _split_into_chunks(content: str, chunk_size: int = 40) -> List[Dict[str, Any]]:
@@ -364,39 +363,9 @@ def test_chroma_vs_fusion_retrieval_eval(tmp_path: Path) -> None:
     chroma_retriever = ChromaRetriever(chroma_storage, embedder)
     fts_retriever = FtsRetriever(fts_storage)
 
-    import re as _re
-
-    def _fts_query(raw: str) -> str:
-        """Strip FTS5-special chars and return a space-joined word query."""
-        words = _re.findall(r"[A-Za-z0-9_]+", raw)
-        return " ".join(words) if words else "x"
-
-    # FTS hits lack a 'metadata' dict; wrap them so collect_retrieved_files can
-    # extract document_id regardless of which source produced a chunk.
-    # Also sanitise the query string so FTS5 doesn't choke on punctuation.
-    class _NormalisingFts:
-        def retrieve_chunks(
-            self, query: str, n_results: int = 50, **filters
-        ) -> List[Dict[str, Any]]:
-            hits = fts_retriever.retrieve_chunks(
-                _fts_query(query), n_results=n_results, **filters
-            )
-            for hit in hits:
-                if "metadata" not in hit:
-                    hit["metadata"] = {
-                        "document_id": hit.get("file_id", ""),
-                        "start_line": hit.get("start_line"),
-                        "end_line": hit.get("end_line"),
-                    }
-                    hit["id"] = hit.get("chunk_id", "")
-            return hits
-
-        def retrieve_symbols(self, query: str, n_results: int = 25) -> List[Dict[str, Any]]:
-            return fts_retriever.retrieve_symbols(_fts_query(query), n_results=n_results)
-
     fusion_retriever = FusionRetriever(
         dense=chroma_retriever,
-        fts=_NormalisingFts(),
+        fts=fts_retriever,
         code_index=code_index,
     )
 
