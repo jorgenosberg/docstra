@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import threading
 from typing import Any, Dict, List, Optional, Sequence
 
 from docstra.core.indexing.model import IndexedSymbol
@@ -73,12 +74,18 @@ CREATE VIRTUAL TABLE IF NOT EXISTS symbols_fts USING fts5(
 
 
 class FtsStorage:
-    """SQLite store with FTS5 indexes for chunks and symbols."""
+    """SQLite store with FTS5 indexes for chunks and symbols.
+
+    The connection is shared across threads (check_same_thread=False) and all
+    statements run under an RLock; Python's sqlite3 module does not serialize
+    concurrent execute() calls on a shared connection on its own.
+    """
 
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
+        self._lock = threading.RLock()
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
-        self._conn = sqlite3.connect(db_path)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._migrate()
 
@@ -107,7 +114,7 @@ class FtsStorage:
         contents: Sequence[str],
     ) -> None:
         rows = list(zip(chunk_ids, file_ids, languages, start_lines, end_lines, contents))
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.executemany(
                 """
                 INSERT INTO chunks (chunk_id, file_id, language, start_line, end_line, content)
@@ -123,7 +130,7 @@ class FtsStorage:
             )
 
     def delete_by_file(self, file_id: str) -> None:
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))
             self._conn.execute("DELETE FROM symbols_fts WHERE file_id = ?", (file_id,))
 
@@ -153,7 +160,9 @@ class FtsStorage:
         """
         params.append(n_results)
         results = []
-        for row in self._conn.execute(sql, params).fetchall():
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        for row in rows:
             results.append({
                 "id": row["chunk_id"],
                 "chunk_id": row["chunk_id"],
@@ -180,7 +189,8 @@ class FtsStorage:
             "SELECT chunk_id, file_id, language, start_line, end_line, content "
             "FROM chunks WHERE chunk_id = ? LIMIT 1"
         )
-        row = self._conn.execute(sql, (chunk_id,)).fetchone()
+        with self._lock:
+            row = self._conn.execute(sql, (chunk_id,)).fetchone()
         return dict(row) if row else None
 
     # --- symbols ---
@@ -189,7 +199,7 @@ class FtsStorage:
         rows = [
             (symbol.id, symbol.file_id, symbol.kind, symbol.name) for symbol in symbols
         ]
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.executemany(
                 "INSERT INTO symbols_fts (symbol_id, file_id, kind, name) VALUES (?, ?, ?, ?)",
                 rows,
@@ -207,7 +217,9 @@ class FtsStorage:
             LIMIT ?
         """
         results = []
-        for row in self._conn.execute(sql, (match_query, n_results)).fetchall():
+        with self._lock:
+            rows = self._conn.execute(sql, (match_query, n_results)).fetchall()
+        for row in rows:
             results.append({
                 "id": row["symbol_id"],
                 "symbol_id": row["symbol_id"],

@@ -160,3 +160,16 @@ def test_query_with_reserved_words_does_not_raise(tmp_path: Path):
     for query in ("NOT null handling", "OR operator", "AND something", "foo AND"):
         # Must not raise; result can be empty or have hits — we only care about no crash.
         store.search_chunks(query, n_results=5)
+
+
+def test_search_chunks_safe_across_threads(tmp_path: Path) -> None:
+    """The FtsStorage connection must be usable from worker threads."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = FtsStorage(str(tmp_path / "index.db"))
+    _add_chunk(store)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _: store.search_chunks("make_chunk_id", 5), range(8)))
+
+    assert all(len(hits) == 1 for hits in results)
