@@ -58,3 +58,20 @@ def test_get_chunk_returns_row_and_none(tmp_path: Path):
     assert row is not None
     assert row["chunk_id"] == "repo/a.py#L1-L5"
     assert retriever.get_chunk("missing#L1-L1") is None
+
+
+def test_retrieve_chunks_ignores_unknown_filter_keys(tmp_path: Path):
+    """Unknown filter keys must not crash; FtsRetriever silently ignores them like Chroma."""
+    store = FtsStorage(str(tmp_path / "index.db"))
+    store.add_chunks(
+        chunk_ids=["a.py#L1-L1"],
+        file_ids=["a.py"],
+        languages=["python"],
+        start_lines=[1],
+        end_lines=[1],
+        contents=["def foo(): pass"],
+    )
+    retriever = FtsRetriever(store)
+    # document_id is a Chroma-style key not supported by FTS — must not raise.
+    hits = retriever.retrieve_chunks("foo", n_results=5, document_id="ignored")
+    assert len(hits) == 1

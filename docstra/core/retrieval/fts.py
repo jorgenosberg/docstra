@@ -20,6 +20,7 @@ class FtsRetriever:
         *,
         language: Optional[str] = None,
         file_id: Optional[str] = None,
+        **_unused_filters: Any,
     ) -> List[Dict[str, Any]]:
         return self.storage.search_chunks(
             query, n_results=n_results, language=language, file_id=file_id
