@@ -495,6 +495,7 @@ def test_chunks_for_file_returns_chunks_in_line_order(tmp_path):
         IndexedChunk(id="b.py#L1-L5", file_id="b.py", language="python",
                      start_line=1, end_line=5, chunk_type="code"),
     ])
+    index._rebuild_lookups()
 
     assert index.chunks_for_file("a.py") == [("a.py#L1-L10", 1, 10), ("a.py#L11-L20", 11, 20)]
     assert index.chunks_for_file("missing.py") == []
@@ -508,6 +509,7 @@ def test_chunks_for_file_returns_chunks_in_line_order(tmp_path):
         IndexedChunk(id="c.py#L1-L10", file_id="c.py", language="python",
                      start_line=1, end_line=10, chunk_type="code"),
     ])
+    index2._rebuild_lookups()
 
     result = index2.chunks_for_file("c.py")
     assert result == [("c.py#L1-L10", 1, 10), ("c.py#L100-L110", 100, 110)]
