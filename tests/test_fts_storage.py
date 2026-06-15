@@ -173,3 +173,41 @@ def test_search_chunks_safe_across_threads(tmp_path: Path) -> None:
         results = list(pool.map(lambda _: store.search_chunks("make_chunk_id", 5), range(8)))
 
     assert all(len(hits) == 1 for hits in results)
+
+
+def test_add_symbols_is_idempotent(tmp_path: Path):
+    """Calling add_symbols twice with the same input must not duplicate rows."""
+    from docstra.core.indexing.model import IndexedSymbol
+
+    store = FtsStorage(str(tmp_path / "index.db"))
+    symbols = [
+        IndexedSymbol(
+            id="x.py::function::foo::L1",
+            file_id="x.py",
+            name="foo",
+            kind="function",
+            language="python",
+            line=1,
+        ),
+        IndexedSymbol(
+            id="x.py::function::bar::L10",
+            file_id="x.py",
+            name="bar",
+            kind="function",
+            language="python",
+            line=10,
+        ),
+    ]
+    store.add_symbols(symbols)
+    store.add_symbols(symbols)  # second call must not duplicate
+
+    foo_hits = store.search_symbols("foo", n_results=10)
+    bar_hits = store.search_symbols("bar", n_results=10)
+    assert len(foo_hits) == 1
+    assert len(bar_hits) == 1
+
+
+def test_add_symbols_empty_list_is_no_op(tmp_path: Path):
+    """An empty symbol list should be a clean no-op (no IN () syntax error)."""
+    store = FtsStorage(str(tmp_path / "index.db"))
+    store.add_symbols([])  # must not raise

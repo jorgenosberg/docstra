@@ -196,10 +196,16 @@ class FtsStorage:
     # --- symbols ---
 
     def add_symbols(self, symbols: List[IndexedSymbol]) -> None:
-        rows = [
-            (symbol.id, symbol.file_id, symbol.kind, symbol.name) for symbol in symbols
-        ]
+        if not symbols:
+            return
+        file_ids = sorted({symbol.file_id for symbol in symbols})
+        rows = [(s.id, s.file_id, s.kind, s.name) for s in symbols]
         with self._lock, self._conn:
+            placeholders = ",".join("?" * len(file_ids))
+            self._conn.execute(
+                f"DELETE FROM symbols_fts WHERE file_id IN ({placeholders})",
+                file_ids,
+            )
             self._conn.executemany(
                 "INSERT INTO symbols_fts (symbol_id, file_id, kind, name) VALUES (?, ?, ?, ?)",
                 rows,
