@@ -140,14 +140,22 @@ class QueryService:
         legacy_repo_map = effective_persist_dir / "repo_map.json"
 
         index_db_path = effective_persist_dir / "index.db"
-        if not core_index_path.exists() or not chroma_check_file.exists() or not index_db_path.exists():
+        if (
+            not core_index_path.exists()
+            or not chroma_check_file.exists()
+            or not index_db_path.exists()
+        ):
             migration_hint = ""
             if legacy_index_artifacts or legacy_repo_map.exists():
                 migration_hint = (
                     " Legacy index artifacts were found. Rerun 'docstra ingest' "
                     "to rebuild the index in the new format."
                 )
-            if not index_db_path.exists() and core_index_path.exists() and chroma_check_file.exists():
+            if (
+                not index_db_path.exists()
+                and core_index_path.exists()
+                and chroma_check_file.exists()
+            ):
                 migration_hint += (
                     " The lexical index (.docstra/index.db) is missing — likely an older "
                     "ingest. Rerun 'docstra ingest' to rebuild it."

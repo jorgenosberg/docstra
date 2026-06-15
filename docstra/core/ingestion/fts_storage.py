@@ -25,6 +25,7 @@ def _sanitize_fts_query(query: str) -> str:
     tokens = _FTS_TOKEN_RE.findall(query)
     return " ".join(tokens).lower()
 
+
 SCHEMA_VERSION = 1
 
 _SCHEMA = """
@@ -92,7 +93,9 @@ class FtsStorage:
     def _migrate(self) -> None:
         with self._conn:
             self._conn.executescript(_SCHEMA)
-            current = self._conn.execute("SELECT version FROM schema_version").fetchone()
+            current = self._conn.execute(
+                "SELECT version FROM schema_version"
+            ).fetchone()
             if current is None:
                 self._conn.execute(
                     "INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
@@ -113,7 +116,9 @@ class FtsStorage:
         end_lines: Sequence[int],
         contents: Sequence[str],
     ) -> None:
-        rows = list(zip(chunk_ids, file_ids, languages, start_lines, end_lines, contents))
+        rows = list(
+            zip(chunk_ids, file_ids, languages, start_lines, end_lines, contents)
+        )
         with self._lock, self._conn:
             self._conn.executemany(
                 """
@@ -135,7 +140,12 @@ class FtsStorage:
             self._conn.execute("DELETE FROM symbols_fts WHERE file_id = ?", (file_id,))
 
     def search_chunks(
-        self, query: str, n_results: int = 50, *, language: Optional[str] = None, file_id: Optional[str] = None
+        self,
+        query: str,
+        n_results: int = 50,
+        *,
+        language: Optional[str] = None,
+        file_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         match_query = _sanitize_fts_query(query)
         if not match_query:
@@ -154,7 +164,7 @@ class FtsStorage:
                    -bm25(chunks_fts) AS score
             FROM chunks_fts
             JOIN chunks ON chunks.rowid = chunks_fts.rowid
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             ORDER BY score DESC
             LIMIT ?
         """
@@ -163,24 +173,26 @@ class FtsStorage:
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
         for row in rows:
-            results.append({
-                "id": row["chunk_id"],
-                "chunk_id": row["chunk_id"],
-                "file_id": row["file_id"],
-                "language": row["language"],
-                "start_line": row["start_line"],
-                "end_line": row["end_line"],
-                "content": row["content"],
-                "score": row["score"],
-                "metadata": {
-                    "document_id": row["file_id"],
-                    "filepath": row["file_id"],
+            results.append(
+                {
+                    "id": row["chunk_id"],
+                    "chunk_id": row["chunk_id"],
+                    "file_id": row["file_id"],
+                    "language": row["language"],
                     "start_line": row["start_line"],
                     "end_line": row["end_line"],
-                    "language": row["language"],
-                    "chunk_type": "code",
-                },
-            })
+                    "content": row["content"],
+                    "score": row["score"],
+                    "metadata": {
+                        "document_id": row["file_id"],
+                        "filepath": row["file_id"],
+                        "start_line": row["start_line"],
+                        "end_line": row["end_line"],
+                        "language": row["language"],
+                        "chunk_type": "code",
+                    },
+                }
+            )
         return results
 
     def get_chunk(self, chunk_id: str) -> Optional[Dict[str, Any]]:
@@ -226,18 +238,20 @@ class FtsStorage:
         with self._lock:
             rows = self._conn.execute(sql, (match_query, n_results)).fetchall()
         for row in rows:
-            results.append({
-                "id": row["symbol_id"],
-                "symbol_id": row["symbol_id"],
-                "file_id": row["file_id"],
-                "kind": row["kind"],
-                "name": row["name"],
-                "score": row["score"],
-                "metadata": {
-                    "document_id": row["file_id"],
-                    "filepath": row["file_id"],
-                    "name": row["name"],
+            results.append(
+                {
+                    "id": row["symbol_id"],
+                    "symbol_id": row["symbol_id"],
+                    "file_id": row["file_id"],
                     "kind": row["kind"],
-                },
-            })
+                    "name": row["name"],
+                    "score": row["score"],
+                    "metadata": {
+                        "document_id": row["file_id"],
+                        "filepath": row["file_id"],
+                        "name": row["name"],
+                        "kind": row["kind"],
+                    },
+                }
+            )
         return results

@@ -26,16 +26,18 @@ def test_retrieve_chunks_delegates_to_storage(tmp_path: Path):
 
 def test_retrieve_symbols_delegates_to_storage(tmp_path: Path):
     store = FtsStorage(str(tmp_path / "index.db"))
-    store.add_symbols([
-        IndexedSymbol(
-            id="x.py::function::foo::L1",
-            file_id="x.py",
-            name="foo",
-            kind="function",
-            language="python",
-            line=1,
-        )
-    ])
+    store.add_symbols(
+        [
+            IndexedSymbol(
+                id="x.py::function::foo::L1",
+                file_id="x.py",
+                name="foo",
+                kind="function",
+                language="python",
+                line=1,
+            )
+        ]
+    )
     retriever = FtsRetriever(store)
     hits = retriever.retrieve_symbols("foo", n_results=5)
     assert len(hits) == 1

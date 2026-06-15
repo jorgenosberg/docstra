@@ -40,7 +40,11 @@ def _chunk(chunk_id: str, file_id: str, start_line: int = 1, end_line: int = 10)
         "start_line": start_line,
         "end_line": end_line,
         "content": f"# chunk {chunk_id}",
-        "metadata": {"document_id": file_id, "start_line": start_line, "end_line": end_line},
+        "metadata": {
+            "document_id": file_id,
+            "start_line": start_line,
+            "end_line": end_line,
+        },
     }
 
 
@@ -48,7 +52,9 @@ def _fake_code_index(chunks_by_file):
     def chunks_for_file(file_id):
         return chunks_by_file.get(file_id, [])
 
-    return SimpleNamespace(chunks_for_file=chunks_for_file, file_language=lambda fid: None)
+    return SimpleNamespace(
+        chunks_for_file=chunks_for_file, file_language=lambda fid: None
+    )
 
 
 def test_rrf_score_known_inputs():
@@ -89,7 +95,14 @@ def test_symbol_hit_promotes_containing_chunk():
     dense = _FakeDense([b, a])
     fts = _FakeFts(
         chunks=[],
-        symbols=[{"symbol_id": "repo/a.py::function::foo::L5", "file_id": "repo/a.py", "name": "foo", "kind": "function"}],
+        symbols=[
+            {
+                "symbol_id": "repo/a.py::function::foo::L5",
+                "file_id": "repo/a.py",
+                "name": "foo",
+                "kind": "function",
+            }
+        ],
     )
 
     code_index = _fake_code_index({"repo/a.py": [("repo/a.py#L1-L10", 1, 10)]})
@@ -109,14 +122,23 @@ def test_symbol_hit_promotes_containing_chunk():
 def test_symbol_path_respects_language_filter():
     """Symbol-derived chunks must obey the language filter just like dense/lex chunks."""
     py_chunk = _chunk("repo/a.py#L1-L10", "repo/a.py", start_line=1, end_line=10)
-    ts_chunk = _chunk("repo/b.ts#L1-L10", "repo/b.ts", start_line=1, end_line=10)
 
     dense = _FakeDense([py_chunk])
     fts = _FakeFts(
         chunks=[],
         symbols=[
-            {"symbol_id": "repo/a.py::function::foo::L5", "file_id": "repo/a.py", "name": "foo", "kind": "function"},
-            {"symbol_id": "repo/b.ts::function::foo::L3", "file_id": "repo/b.ts", "name": "foo", "kind": "function"},
+            {
+                "symbol_id": "repo/a.py::function::foo::L5",
+                "file_id": "repo/a.py",
+                "name": "foo",
+                "kind": "function",
+            },
+            {
+                "symbol_id": "repo/b.ts::function::foo::L3",
+                "file_id": "repo/b.ts",
+                "name": "foo",
+                "kind": "function",
+            },
         ],
     )
 
@@ -125,7 +147,10 @@ def test_symbol_path_respects_language_filter():
             "repo/a.py": [("repo/a.py#L1-L10", 1, 10)],
             "repo/b.ts": [("repo/b.ts#L1-L10", 1, 10)],
         }.get(fid, []),
-        file_language=lambda fid: {"repo/a.py": "python", "repo/b.ts": "typescript"}.get(fid),
+        file_language=lambda fid: {
+            "repo/a.py": "python",
+            "repo/b.ts": "typescript",
+        }.get(fid),
     )
 
     fusion = FusionRetriever(
@@ -185,13 +210,22 @@ def test_symbol_derived_chunk_carries_content(tmp_path):
             return []
 
         def retrieve_symbols(self, *a, **kw):
-            return [{"symbol_id": "repo/a.py::function::foo::L2", "file_id": "repo/a.py", "name": "foo", "kind": "function"}]
+            return [
+                {
+                    "symbol_id": "repo/a.py::function::foo::L2",
+                    "file_id": "repo/a.py",
+                    "name": "foo",
+                    "kind": "function",
+                }
+            ]
 
         def get_chunk(self, chunk_id):
             return self._real.get_chunk(chunk_id)
 
     code_index = SimpleNamespace(
-        chunks_for_file=lambda fid: [("repo/a.py#L1-L10", 1, 10)] if fid == "repo/a.py" else [],
+        chunks_for_file=lambda fid: (
+            [("repo/a.py#L1-L10", 1, 10)] if fid == "repo/a.py" else []
+        ),
         file_language=lambda fid: "python" if fid == "repo/a.py" else None,
     )
 

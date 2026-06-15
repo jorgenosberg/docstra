@@ -305,9 +305,7 @@ class docstraant:
             Generated answer
         """
         # Retrieve relevant chunks
-        results = self.fusion_retriever.retrieve(
-            query=question, n_results=n_results
-        )
+        results = self.fusion_retriever.retrieve(query=question, n_results=n_results)
 
         # Generate answer
         return self._require_text_response(

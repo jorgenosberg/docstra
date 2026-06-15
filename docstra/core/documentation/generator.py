@@ -156,18 +156,21 @@ class DocumentationGenerator:
         if self.chroma_retriever and self.code_index and persist_directory:
             fts_storage = FtsStorage(str(Path(persist_directory) / "index.db"))
             fts_retriever = FtsRetriever(fts_storage)
-            kwargs = {
-                "dense": self.chroma_retriever,
-                "fts": fts_retriever,
-                "code_index": self.code_index,
-            }
-            if user_config and hasattr(user_config, 'retrieval'):
-                kwargs.update({
-                    "rrf_k": user_config.retrieval.rrf_k,
-                    "fts_chunks_top_k": user_config.retrieval.fts_chunks_top_k,
-                    "fts_symbols_top_k": user_config.retrieval.fts_symbols_top_k,
-                })
-            self.fusion_retriever = FusionRetriever(**kwargs)
+            if user_config and hasattr(user_config, "retrieval"):
+                self.fusion_retriever = FusionRetriever(
+                    dense=self.chroma_retriever,
+                    fts=fts_retriever,
+                    code_index=self.code_index,
+                    rrf_k=user_config.retrieval.rrf_k,
+                    fts_chunks_top_k=user_config.retrieval.fts_chunks_top_k,
+                    fts_symbols_top_k=user_config.retrieval.fts_symbols_top_k,
+                )
+            else:
+                self.fusion_retriever = FusionRetriever(
+                    dense=self.chroma_retriever,
+                    fts=fts_retriever,
+                    code_index=self.code_index,
+                )
 
         # Documentation state
         self.processed_documents: Dict[str, Document] = {}

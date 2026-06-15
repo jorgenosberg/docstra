@@ -487,28 +487,65 @@ def test_chunks_for_file_returns_chunks_in_line_order(tmp_path):
 
     index = CodebaseIndex(index_directory=str(tmp_path / "index"))
     index._manifest = CoreIndexManifest.empty()
-    index._manifest.chunks.extend([
-        IndexedChunk(id="a.py#L1-L10", file_id="a.py", language="python",
-                     start_line=1, end_line=10, chunk_type="code"),
-        IndexedChunk(id="a.py#L11-L20", file_id="a.py", language="python",
-                     start_line=11, end_line=20, chunk_type="code"),
-        IndexedChunk(id="b.py#L1-L5", file_id="b.py", language="python",
-                     start_line=1, end_line=5, chunk_type="code"),
-    ])
+    index._manifest.chunks.extend(
+        [
+            IndexedChunk(
+                id="a.py#L1-L10",
+                file_id="a.py",
+                language="python",
+                start_line=1,
+                end_line=10,
+                chunk_type="code",
+            ),
+            IndexedChunk(
+                id="a.py#L11-L20",
+                file_id="a.py",
+                language="python",
+                start_line=11,
+                end_line=20,
+                chunk_type="code",
+            ),
+            IndexedChunk(
+                id="b.py#L1-L5",
+                file_id="b.py",
+                language="python",
+                start_line=1,
+                end_line=5,
+                chunk_type="code",
+            ),
+        ]
+    )
     index._rebuild_lookups()
 
-    assert index.chunks_for_file("a.py") == [("a.py#L1-L10", 1, 10), ("a.py#L11-L20", 11, 20)]
+    assert index.chunks_for_file("a.py") == [
+        ("a.py#L1-L10", 1, 10),
+        ("a.py#L11-L20", 11, 20),
+    ]
     assert index.chunks_for_file("missing.py") == []
 
     # Verify sorting is enforced even when chunks are inserted in reverse line order.
     index2 = CodebaseIndex(index_directory=str(tmp_path / "index2"))
     index2._manifest = CoreIndexManifest.empty()
-    index2._manifest.chunks.extend([
-        IndexedChunk(id="c.py#L100-L110", file_id="c.py", language="python",
-                     start_line=100, end_line=110, chunk_type="code"),
-        IndexedChunk(id="c.py#L1-L10", file_id="c.py", language="python",
-                     start_line=1, end_line=10, chunk_type="code"),
-    ])
+    index2._manifest.chunks.extend(
+        [
+            IndexedChunk(
+                id="c.py#L100-L110",
+                file_id="c.py",
+                language="python",
+                start_line=100,
+                end_line=110,
+                chunk_type="code",
+            ),
+            IndexedChunk(
+                id="c.py#L1-L10",
+                file_id="c.py",
+                language="python",
+                start_line=1,
+                end_line=10,
+                chunk_type="code",
+            ),
+        ]
+    )
     index2._rebuild_lookups()
 
     result = index2.chunks_for_file("c.py")

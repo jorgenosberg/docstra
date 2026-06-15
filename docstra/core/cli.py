@@ -1691,7 +1691,9 @@ def _get_persist_paths(
 def _create_retrieval_eval_runner(
     user_config: UserConfig, abs_codebase_path: Path
 ) -> Callable[[str, int], List[Dict[str, Any]]]:
-    effective_persist_dir, chroma_path, index_path = _get_persist_paths(user_config, abs_codebase_path)
+    effective_persist_dir, chroma_path, index_path = _get_persist_paths(
+        user_config, abs_codebase_path
+    )
     core_index_path = index_path / CORE_INDEX_FILENAME
     chroma_check_file = chroma_path / "chroma.sqlite3"
     legacy_index_artifacts = CodebaseIndex.legacy_artifacts_in(index_path)

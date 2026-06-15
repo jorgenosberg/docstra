@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from docstra.core.ingestion.fts_storage import FtsStorage, _sanitize_fts_query
 
 
@@ -30,7 +28,7 @@ def _add_chunk(store: FtsStorage, **overrides):
 
 def test_schema_creates_on_first_open(tmp_path: Path):
     db_path = tmp_path / "index.db"
-    store = FtsStorage(str(db_path))
+    FtsStorage(str(db_path))
     assert db_path.exists()
     # Idempotent: opening again does not raise.
     FtsStorage(str(db_path))
@@ -59,8 +57,20 @@ def test_delete_by_file_removes_chunks_and_fts(tmp_path: Path):
 
 def test_search_supports_language_filter(tmp_path: Path):
     store = FtsStorage(str(tmp_path / "index.db"))
-    _add_chunk(store, chunk_id="a.py#L1-L1", file_id="a.py", language="python", content="foo bar")
-    _add_chunk(store, chunk_id="b.ts#L1-L1", file_id="b.ts", language="typescript", content="foo bar")
+    _add_chunk(
+        store,
+        chunk_id="a.py#L1-L1",
+        file_id="a.py",
+        language="python",
+        content="foo bar",
+    )
+    _add_chunk(
+        store,
+        chunk_id="b.ts#L1-L1",
+        file_id="b.ts",
+        language="typescript",
+        content="foo bar",
+    )
     hits = store.search_chunks("foo", n_results=5, language="python")
     assert {h["file_id"] for h in hits} == {"a.py"}
 
@@ -69,24 +79,26 @@ def test_add_and_search_symbols(tmp_path: Path):
     from docstra.core.indexing.model import IndexedSymbol
 
     store = FtsStorage(str(tmp_path / "index.db"))
-    store.add_symbols([
-        IndexedSymbol(
-            id="repo/file.py::function::make_chunk_id::L67",
-            file_id="repo/file.py",
-            name="make_chunk_id",
-            kind="function",
-            language="python",
-            line=67,
-        ),
-        IndexedSymbol(
-            id="repo/other.py::class::CoreIndexBuilder::L194",
-            file_id="repo/other.py",
-            name="CoreIndexBuilder",
-            kind="class",
-            language="python",
-            line=194,
-        ),
-    ])
+    store.add_symbols(
+        [
+            IndexedSymbol(
+                id="repo/file.py::function::make_chunk_id::L67",
+                file_id="repo/file.py",
+                name="make_chunk_id",
+                kind="function",
+                language="python",
+                line=67,
+            ),
+            IndexedSymbol(
+                id="repo/other.py::class::CoreIndexBuilder::L194",
+                file_id="repo/other.py",
+                name="CoreIndexBuilder",
+                kind="class",
+                language="python",
+                line=194,
+            ),
+        ]
+    )
     hits = store.search_symbols("CoreIndexBuilder", n_results=5)
     assert len(hits) == 1
     assert hits[0]["name"] == "CoreIndexBuilder"
@@ -100,16 +112,18 @@ def test_delete_by_file_removes_symbols(tmp_path: Path):
     from docstra.core.indexing.model import IndexedSymbol
 
     store = FtsStorage(str(tmp_path / "index.db"))
-    store.add_symbols([
-        IndexedSymbol(
-            id="x.py::function::foo::L1",
-            file_id="x.py",
-            name="foo",
-            kind="function",
-            language="python",
-            line=1,
-        )
-    ])
+    store.add_symbols(
+        [
+            IndexedSymbol(
+                id="x.py::function::foo::L1",
+                file_id="x.py",
+                name="foo",
+                kind="function",
+                language="python",
+                line=1,
+            )
+        ]
+    )
     store.delete_by_file("x.py")
     assert store.search_symbols("foo", n_results=5) == []
 
@@ -170,7 +184,9 @@ def test_search_chunks_safe_across_threads(tmp_path: Path) -> None:
     _add_chunk(store)
 
     with ThreadPoolExecutor(max_workers=4) as pool:
-        results = list(pool.map(lambda _: store.search_chunks("make_chunk_id", 5), range(8)))
+        results = list(
+            pool.map(lambda _: store.search_chunks("make_chunk_id", 5), range(8))
+        )
 
     assert all(len(hits) == 1 for hits in results)
 

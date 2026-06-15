@@ -14,12 +14,18 @@ def rrf_score(rank: int, k: int) -> float:
 
 
 class _DenseLike(Protocol):
-    def retrieve_chunks(self, query: str, n_results: int = 20, **filters) -> List[Dict[str, Any]]: ...
+    def retrieve_chunks(
+        self, query: str, n_results: int = 20, **filters
+    ) -> List[Dict[str, Any]]: ...
 
 
 class _FtsLike(Protocol):
-    def retrieve_chunks(self, query: str, n_results: int = 50, **filters) -> List[Dict[str, Any]]: ...
-    def retrieve_symbols(self, query: str, n_results: int = 25) -> List[Dict[str, Any]]: ...
+    def retrieve_chunks(
+        self, query: str, n_results: int = 50, **filters
+    ) -> List[Dict[str, Any]]: ...
+    def retrieve_symbols(
+        self, query: str, n_results: int = 25
+    ) -> List[Dict[str, Any]]: ...
     def get_chunk(self, chunk_id: str) -> Optional[Dict[str, Any]]: ...
 
 
@@ -43,13 +49,17 @@ class FusionRetriever:
         self.fts_chunks_top_k = fts_chunks_top_k
         self.fts_symbols_top_k = fts_symbols_top_k
 
-    def retrieve(self, query: str, n_results: int = 20, **filters) -> List[Dict[str, Any]]:
+    def retrieve(
+        self, query: str, n_results: int = 20, **filters
+    ) -> List[Dict[str, Any]]:
         return self.retrieve_chunks(query, n_results=n_results, **filters)
 
     def retrieve_chunks(
         self, query: str, n_results: int = 20, **filters
     ) -> List[Dict[str, Any]]:
-        dense_hits = self.dense.retrieve_chunks(query, n_results=n_results * 2, **filters)
+        dense_hits = self.dense.retrieve_chunks(
+            query, n_results=n_results * 2, **filters
+        )
         lex_chunk_hits = self.fts.retrieve_chunks(
             query, n_results=self.fts_chunks_top_k, **filters
         )
@@ -186,36 +196,43 @@ class FusionRetriever:
                 continue
             if file_id_filter is not None and file_id != file_id_filter:
                 continue
-            if language is not None and self.code_index.file_language(file_id) != language:
+            if (
+                language is not None
+                and self.code_index.file_language(file_id) != language
+            ):
                 continue
             symbol_id = symbol_hit.get("symbol_id", "")
             line = _extract_line_from_symbol_id(symbol_id)
             if line is None:
                 continue
-            for chunk_id, start_line, end_line in self.code_index.chunks_for_file(file_id):
+            for chunk_id, start_line, end_line in self.code_index.chunks_for_file(
+                file_id
+            ):
                 if start_line <= line <= end_line and chunk_id not in seen:
                     seen.add(chunk_id)
                     chunk_row = self.fts.get_chunk(chunk_id)
                     content = chunk_row["content"] if chunk_row else ""
                     lang = chunk_row["language"] if chunk_row else ""
-                    results.append({
-                        "chunk_id": chunk_id,
-                        "id": chunk_id,
-                        "file_id": file_id,
-                        "language": lang,
-                        "start_line": start_line,
-                        "end_line": end_line,
-                        "content": content,
-                        "metadata": {
-                            "document_id": file_id,
-                            "filepath": file_id,
+                    results.append(
+                        {
+                            "chunk_id": chunk_id,
+                            "id": chunk_id,
+                            "file_id": file_id,
+                            "language": lang,
                             "start_line": start_line,
                             "end_line": end_line,
-                            "language": lang,
-                            "chunk_type": "code",
-                            "via_symbol": symbol_hit.get("name"),
-                        },
-                    })
+                            "content": content,
+                            "metadata": {
+                                "document_id": file_id,
+                                "filepath": file_id,
+                                "start_line": start_line,
+                                "end_line": end_line,
+                                "language": lang,
+                                "chunk_type": "code",
+                                "via_symbol": symbol_hit.get("name"),
+                            },
+                        }
+                    )
                     break
         return results
 
