@@ -27,3 +27,6 @@ class FtsRetriever:
 
     def retrieve_symbols(self, query: str, n_results: int = 25) -> List[Dict[str, Any]]:
         return self.storage.search_symbols(query, n_results=n_results)
+
+    def get_chunk(self, chunk_id: str) -> Optional[Dict[str, Any]]:
+        return self.storage.get_chunk(chunk_id)

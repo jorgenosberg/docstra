@@ -27,6 +27,9 @@ class _FakeFts:
     def retrieve_symbols(self, query: str, n_results: int = 25):
         return self._symbols[:n_results]
 
+    def get_chunk(self, chunk_id: str):
+        return None
+
 
 def _chunk(chunk_id: str, file_id: str, start_line: int = 1, end_line: int = 10):
     return {
@@ -154,6 +157,56 @@ def test_empty_lexical_source_does_not_break_fusion():
     )
     hits = fusion.retrieve_chunks("anything", n_results=5)
     assert [h["chunk_id"] for h in hits] == ["repo/a.py#L1-L10"]
+
+
+def test_symbol_derived_chunk_carries_content(tmp_path):
+    """A symbol hit that promotes a chunk must surface the chunk's real content."""
+    from docstra.core.ingestion.fts_storage import FtsStorage
+    from docstra.core.retrieval.fts import FtsRetriever
+
+    fts_storage = FtsStorage(str(tmp_path / "index.db"))
+    fts_storage.add_chunks(
+        chunk_ids=["repo/a.py#L1-L10"],
+        file_ids=["repo/a.py"],
+        languages=["python"],
+        start_lines=[1],
+        end_lines=[10],
+        contents=["def foo():\n    return 42\n"],
+    )
+    fts = FtsRetriever(fts_storage)
+
+    dense = _FakeDense([])
+
+    class _SymbolOnlyFts:
+        def __init__(self, real):
+            self._real = real
+
+        def retrieve_chunks(self, *a, **kw):
+            return []
+
+        def retrieve_symbols(self, *a, **kw):
+            return [{"symbol_id": "repo/a.py::function::foo::L2", "file_id": "repo/a.py", "name": "foo", "kind": "function"}]
+
+        def get_chunk(self, chunk_id):
+            return self._real.get_chunk(chunk_id)
+
+    code_index = SimpleNamespace(
+        chunks_for_file=lambda fid: [("repo/a.py#L1-L10", 1, 10)] if fid == "repo/a.py" else [],
+        file_language=lambda fid: "python" if fid == "repo/a.py" else None,
+    )
+
+    fusion = FusionRetriever(
+        dense=dense,
+        fts=_SymbolOnlyFts(fts),
+        code_index=code_index,
+        rrf_k=60,
+        fts_chunks_top_k=10,
+        fts_symbols_top_k=10,
+    )
+    hits = fusion.retrieve_chunks("foo", n_results=5)
+    assert len(hits) == 1
+    assert "def foo()" in hits[0]["content"]
+    assert hits[0]["metadata"]["via_symbol"] == "foo"
 
 
 def test_retrieve_code_examples_prefers_function_chunks():

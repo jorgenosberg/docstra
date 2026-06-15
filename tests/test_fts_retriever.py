@@ -41,3 +41,20 @@ def test_retrieve_symbols_delegates_to_storage(tmp_path: Path):
     assert len(hits) == 1
     assert hits[0]["name"] == "foo"
     assert hits[0]["metadata"]["document_id"] == "x.py"
+
+
+def test_get_chunk_returns_row_and_none(tmp_path: Path):
+    store = FtsStorage(str(tmp_path / "index.db"))
+    store.add_chunks(
+        chunk_ids=["repo/a.py#L1-L5"],
+        file_ids=["repo/a.py"],
+        languages=["python"],
+        start_lines=[1],
+        end_lines=[5],
+        contents=["def bar(): pass"],
+    )
+    retriever = FtsRetriever(store)
+    row = retriever.get_chunk("repo/a.py#L1-L5")
+    assert row is not None
+    assert row["chunk_id"] == "repo/a.py#L1-L5"
+    assert retriever.get_chunk("missing#L1-L1") is None

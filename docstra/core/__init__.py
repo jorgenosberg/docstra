@@ -88,11 +88,16 @@ class docstraant:
             ]
         )
 
+        # FTS storage (shared by indexer and retriever)
+        self.fts_storage = FtsStorage(f"{storage_dir}/index.db")
+        self.fts_retriever = FtsRetriever(self.fts_storage)
+
         # Document indexer
         self.document_indexer = DocumentIndexer(
             self.storage,
             self.embedding_generator,
             codebase_root=str(Path.cwd()),
+            fts_storage=self.fts_storage,
         )
 
         # Code indexer
@@ -113,11 +118,9 @@ class docstraant:
         )
 
         # Fusion retriever
-        fts_storage = FtsStorage(f"{storage_dir}/index.db")
-        fts_retriever = FtsRetriever(fts_storage)
         self.fusion_retriever = FusionRetriever(
             dense=self.retriever,
-            fts=fts_retriever,
+            fts=self.fts_retriever,
             code_index=self.code_indexer.get_index(),
             rrf_k=self.config.retrieval.rrf_k,
             fts_chunks_top_k=self.config.retrieval.fts_chunks_top_k,
@@ -206,6 +209,12 @@ class docstraant:
         # Index the document
         doc_id = self.document_indexer.index_document(document)
         self.code_indexer.index_document(document)
+
+        # Write symbols to FTS for this file
+        manifest = self.code_indexer.get_manifest()
+        file_symbols = [s for s in manifest.symbols if s.file_id == doc_id]
+        if file_symbols:
+            self.fts_storage.add_symbols(file_symbols)
 
         return doc_id
 

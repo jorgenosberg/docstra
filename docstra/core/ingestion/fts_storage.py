@@ -174,6 +174,15 @@ class FtsStorage:
             })
         return results
 
+    def get_chunk(self, chunk_id: str) -> Optional[Dict[str, Any]]:
+        """Return the full row for a single chunk id, or None if absent."""
+        sql = (
+            "SELECT chunk_id, file_id, language, start_line, end_line, content "
+            "FROM chunks WHERE chunk_id = ? LIMIT 1"
+        )
+        row = self._conn.execute(sql, (chunk_id,)).fetchone()
+        return dict(row) if row else None
+
     # --- symbols ---
 
     def add_symbols(self, symbols: List[IndexedSymbol]) -> None:

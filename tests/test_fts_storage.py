@@ -138,6 +138,20 @@ def test_empty_query_returns_empty_list(tmp_path: Path):
     assert store.search_symbols("???", n_results=5) == []
 
 
+def test_get_chunk_returns_row(tmp_path: Path):
+    store = FtsStorage(str(tmp_path / "index.db"))
+    payload = _add_chunk(store)
+    row = store.get_chunk(payload["chunk_id"])
+    assert row is not None
+    assert row["chunk_id"] == payload["chunk_id"]
+    assert row["content"] == payload["content"]
+
+
+def test_get_chunk_returns_none_for_missing(tmp_path: Path):
+    store = FtsStorage(str(tmp_path / "index.db"))
+    assert store.get_chunk("nonexistent#L1-L1") is None
+
+
 def test_query_with_reserved_words_does_not_raise(tmp_path: Path):
     """A natural-language query starting with NOT/AND/OR must not crash FTS5."""
     store = FtsStorage(str(tmp_path / "index.db"))

@@ -20,6 +20,7 @@ class _DenseLike(Protocol):
 class _FtsLike(Protocol):
     def retrieve_chunks(self, query: str, n_results: int = 50, **filters) -> List[Dict[str, Any]]: ...
     def retrieve_symbols(self, query: str, n_results: int = 25) -> List[Dict[str, Any]]: ...
+    def get_chunk(self, chunk_id: str) -> Optional[Dict[str, Any]]: ...
 
 
 class FusionRetriever:
@@ -202,17 +203,24 @@ class FusionRetriever:
             for chunk_id, start_line, end_line in self.code_index.chunks_for_file(file_id):
                 if start_line <= line <= end_line and chunk_id not in seen:
                     seen.add(chunk_id)
+                    chunk_row = self.fts.get_chunk(chunk_id)
+                    content = chunk_row["content"] if chunk_row else ""
+                    lang = chunk_row["language"] if chunk_row else ""
                     results.append({
                         "chunk_id": chunk_id,
                         "id": chunk_id,
                         "file_id": file_id,
+                        "language": lang,
                         "start_line": start_line,
                         "end_line": end_line,
-                        "content": "",
+                        "content": content,
                         "metadata": {
                             "document_id": file_id,
+                            "filepath": file_id,
                             "start_line": start_line,
                             "end_line": end_line,
+                            "language": lang,
+                            "chunk_type": "code",
                             "via_symbol": symbol_hit.get("name"),
                         },
                     })
