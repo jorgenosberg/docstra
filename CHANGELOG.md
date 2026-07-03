@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.0](https://github.com/jorgenosberg/docstra/compare/docstra-v0.2.0...docstra-v0.3.0) (2026-07-03)
+
+
+### Features
+
+* **cli:** add index command to build the core index without embeddings ([e637a58](https://github.com/jorgenosberg/docstra/commit/e637a581567ba6b06727d253ac687578a2e8e072))
+* **docs:** derive cross-references from the import graph instead of embedding similarity ([7decb50](https://github.com/jorgenosberg/docstra/commit/7decb502d10347fa7cbc6ccb10cc9f1b05f4893a))
+* **indexing:** expose graph-verified file cross-references on CodebaseIndex ([7c8a858](https://github.com/jorgenosberg/docstra/commit/7c8a858df47e30fe214a10efa422485813026183))
+
 ## [0.2.0](https://github.com/jorgenosberg/docstra/compare/docstra-v0.1.15...docstra-v0.2.0) (2026-07-03)
 
 
