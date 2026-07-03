@@ -10,6 +10,7 @@ from docstra.core.document_processing.document import (
     DocumentType,
 )
 from docstra.core.indexing.model import CORE_INDEX_FILENAME, CoreIndexBuilder
+from docstra.core.ingestion.fts_storage import FtsStorage
 from docstra.core.ingestion.storage import ChromaDBStorage
 from docstra.core.services.query_service import QueryService
 from docstra.core.services.repository_explorer_service import RepositoryExplorerService
@@ -62,6 +63,7 @@ def _write_core_index(codebase_root: Path) -> None:
         manifest.model_dump_json(indent=2), encoding="utf-8"
     )
     ChromaDBStorage(persist_directory=str(persist_dir / "chroma"))
+    FtsStorage(str(persist_dir / "index.db"))
 
 
 def test_query_service_initializes_from_core_index_without_repo_map(

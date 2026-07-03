@@ -39,8 +39,10 @@ from docstra.core.llm.anthropic import AnthropicClient
 from docstra.core.llm.local import LocalModelClient
 from docstra.core.llm.ollama import OllamaClient
 from docstra.core.llm.openai import OpenAIClient
+from docstra.core.ingestion.fts_storage import FtsStorage
 from docstra.core.retrieval.chroma import ChromaRetriever
-from docstra.core.retrieval.hybrid import HybridRetriever
+from docstra.core.retrieval.fts import FtsRetriever
+from docstra.core.retrieval.fusion import FusionRetriever
 
 
 class docstraant:
@@ -86,11 +88,16 @@ class docstraant:
             ]
         )
 
+        # FTS storage (shared by indexer and retriever)
+        self.fts_storage = FtsStorage(f"{storage_dir}/index.db")
+        self.fts_retriever = FtsRetriever(self.fts_storage)
+
         # Document indexer
         self.document_indexer = DocumentIndexer(
             self.storage,
             self.embedding_generator,
             codebase_root=str(Path.cwd()),
+            fts_storage=self.fts_storage,
         )
 
         # Code indexer
@@ -110,9 +117,14 @@ class docstraant:
             codebase_root=str(Path.cwd()),
         )
 
-        # Hybrid retriever
-        self.hybrid_retriever = HybridRetriever(
-            self.retriever, self.code_indexer.get_index()
+        # Fusion retriever
+        self.fusion_retriever = FusionRetriever(
+            dense=self.retriever,
+            fts=self.fts_retriever,
+            code_index=self.code_indexer.get_index(),
+            rrf_k=self.config.retrieval.rrf_k,
+            fts_chunks_top_k=self.config.retrieval.fts_chunks_top_k,
+            fts_symbols_top_k=self.config.retrieval.fts_symbols_top_k,
         )
 
         # LLM client
@@ -197,6 +209,12 @@ class docstraant:
         # Index the document
         doc_id = self.document_indexer.index_document(document)
         self.code_indexer.index_document(document)
+
+        # Write symbols to FTS for this file
+        manifest = self.code_indexer.get_manifest()
+        file_symbols = [s for s in manifest.symbols if s.file_id == doc_id]
+        if file_symbols:
+            self.fts_storage.add_symbols(file_symbols)
 
         return doc_id
 
@@ -287,9 +305,7 @@ class docstraant:
             Generated answer
         """
         # Retrieve relevant chunks
-        results = self.hybrid_retriever.retrieve(
-            query=question, n_results=n_results, use_code_context=True
-        )
+        results = self.fusion_retriever.retrieve(query=question, n_results=n_results)
 
         # Generate answer
         return self._require_text_response(

@@ -120,6 +120,18 @@ class ProcessingConfig:
         self.exclude_patterns = exclude_patterns or []
 
 
+class RetrievalConfig:
+    def __init__(
+        self,
+        rrf_k: int = 60,
+        fts_chunks_top_k: int = 50,
+        fts_symbols_top_k: int = 25,
+    ) -> None:
+        self.rrf_k = rrf_k
+        self.fts_chunks_top_k = fts_chunks_top_k
+        self.fts_symbols_top_k = fts_symbols_top_k
+
+
 class ConfigManager:
     def __init__(self, config_path: Optional[str] = None) -> None:
         self.config_path = config_path or "./.docstra/config.yaml"
@@ -180,6 +192,7 @@ class UserConfig:
         self.processing = ProcessingConfig()
         self.ingestion = IngestionConfig()
         self.documentation = DocumentationConfig()
+        self.retrieval = RetrievalConfig()
 
     def save_to_file(self, path: str) -> None:
         """Save configuration to YAML file."""
@@ -219,6 +232,11 @@ class UserConfig:
                 "exclude_patterns": self.ingestion.exclude_patterns,
             },
             "documentation": self.documentation.model_dump(),
+            "retrieval": {
+                "rrf_k": self.retrieval.rrf_k,
+                "fts_chunks_top_k": self.retrieval.fts_chunks_top_k,
+                "fts_symbols_top_k": self.retrieval.fts_symbols_top_k,
+            },
         }
 
         # Write to YAML file
@@ -283,3 +301,12 @@ class UserConfig:
                 self.processing.chunk_overlap = processing_data["chunk_overlap"]
             if "exclude_patterns" in processing_data:
                 self.processing.exclude_patterns = processing_data["exclude_patterns"]
+
+        if "retrieval" in config_dict:
+            retrieval_data = config_dict["retrieval"]
+            if "rrf_k" in retrieval_data:
+                self.retrieval.rrf_k = retrieval_data["rrf_k"]
+            if "fts_chunks_top_k" in retrieval_data:
+                self.retrieval.fts_chunks_top_k = retrieval_data["fts_chunks_top_k"]
+            if "fts_symbols_top_k" in retrieval_data:
+                self.retrieval.fts_symbols_top_k = retrieval_data["fts_symbols_top_k"]

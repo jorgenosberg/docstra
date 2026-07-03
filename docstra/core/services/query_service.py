@@ -20,8 +20,10 @@ from docstra.core.ingestion.storage import ChromaDBStorage
 from docstra.core.retrieval.chroma import ChromaRetriever
 from docstra.core.indexing.code_index import CodebaseIndex, CodebaseIndexer
 from docstra.core.indexing.model import CORE_INDEX_FILENAME
-from docstra.core.retrieval.hybrid import HybridRetriever
 from docstra.core.retrieval.context_aware import ContextAwareRetriever
+from docstra.core.ingestion.fts_storage import FtsStorage
+from docstra.core.retrieval.fts import FtsRetriever
+from docstra.core.retrieval.fusion import FusionRetriever
 from docstra.core.utils.token_counter import get_token_counter, ContextBudgetManager
 
 
@@ -94,7 +96,9 @@ class QueryService:
         self.storage: Optional[ChromaDBStorage] = None
         self.retriever: Optional[ChromaRetriever] = None
         self.code_indexer: Optional[CodebaseIndexer] = None
-        self.hybrid_retriever: Optional[HybridRetriever] = None
+        self.fts_storage: Optional[FtsStorage] = None
+        self.fts_retriever: Optional[FtsRetriever] = None
+        self.fusion_retriever: Optional[FusionRetriever] = None
         self.context_aware_retriever: Optional[ContextAwareRetriever] = None
         self.token_counter = get_token_counter(
             self.user_config.model.model_name, self.user_config.model.provider
@@ -135,17 +139,32 @@ class QueryService:
         legacy_index_artifacts = CodebaseIndex.legacy_artifacts_in(index_path)
         legacy_repo_map = effective_persist_dir / "repo_map.json"
 
-        if not core_index_path.exists() or not chroma_check_file.exists():
+        index_db_path = effective_persist_dir / "index.db"
+        if (
+            not core_index_path.exists()
+            or not chroma_check_file.exists()
+            or not index_db_path.exists()
+        ):
             migration_hint = ""
             if legacy_index_artifacts or legacy_repo_map.exists():
                 migration_hint = (
                     " Legacy index artifacts were found. Rerun 'docstra ingest' "
                     "to rebuild the index in the new format."
                 )
+            if (
+                not index_db_path.exists()
+                and core_index_path.exists()
+                and chroma_check_file.exists()
+            ):
+                migration_hint += (
+                    " The lexical index (.docstra/index.db) is missing — likely an older "
+                    "ingest. Rerun 'docstra ingest' to rebuild it."
+                )
             error_msg = (
                 f"Codebase at {abs_codebase_path} not fully initialized for querying. "
                 f"ChromaDB path: {chroma_path} (check file: {chroma_check_file}, exists: {chroma_check_file.exists()}), "
-                f"Core index path: {core_index_path} (exists: {core_index_path.exists()}). "
+                f"Core index path: {core_index_path} (exists: {core_index_path.exists()}), "
+                f"Lexical index: {index_db_path} (exists: {index_db_path.exists()}). "
                 "Run 'docstra init' and 'docstra ingest' first."
                 f"{migration_hint}"
             )
@@ -166,7 +185,17 @@ class QueryService:
             code_index_instance = self.code_indexer.get_index()
             if code_index_instance is None:
                 raise ValueError(f"Failed to load code index from {index_path}")
-            self.hybrid_retriever = HybridRetriever(self.retriever, code_index_instance)
+
+            self.fts_storage = FtsStorage(str(effective_persist_dir / "index.db"))
+            self.fts_retriever = FtsRetriever(self.fts_storage)
+            self.fusion_retriever = FusionRetriever(
+                dense=self.retriever,
+                fts=self.fts_retriever,
+                code_index=code_index_instance,
+                rrf_k=self.user_config.retrieval.rrf_k,
+                fts_chunks_top_k=self.user_config.retrieval.fts_chunks_top_k,
+                fts_symbols_top_k=self.user_config.retrieval.fts_symbols_top_k,
+            )
 
             # Initialize context-aware retriever
             repo_map = None
@@ -181,7 +210,7 @@ class QueryService:
                 )
 
             self.context_aware_retriever = ContextAwareRetriever(
-                base_retriever=self.retriever,
+                base_retriever=self.fusion_retriever,
                 budget_manager=self.budget_manager,
                 code_index=code_index_instance,
                 repo_map=repo_map,

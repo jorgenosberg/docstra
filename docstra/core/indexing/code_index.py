@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections import defaultdict
 import os
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, TypeVar, Union
 
 from docstra.core.document_processing.document import Document, DocumentType
 from docstra.core.indexing.model import (
@@ -55,6 +55,7 @@ class CodebaseIndex:
         self._functions_by_name: Dict[str, List[IndexedSymbol]] = defaultdict(list)
         self._classes_by_name: Dict[str, List[IndexedSymbol]] = defaultdict(list)
         self._symbols_by_file: Dict[str, List[IndexedSymbol]] = defaultdict(list)
+        self._chunks_by_file: Dict[str, List[Tuple[str, int, int]]] = defaultdict(list)
         self._imports_by_source: Dict[str, List[ImportRecord]] = defaultdict(list)
         self._imports_by_text: Dict[str, List[str]] = defaultdict(list)
         self._dependencies_by_source: Dict[str, List[str]] = defaultdict(list)
@@ -110,6 +111,7 @@ class CodebaseIndex:
         self._functions_by_name = defaultdict(list)
         self._classes_by_name = defaultdict(list)
         self._symbols_by_file = defaultdict(list)
+        self._chunks_by_file = defaultdict(list)
         self._imports_by_source = defaultdict(list)
         self._imports_by_text = defaultdict(list)
         self._dependencies_by_source = defaultdict(list)
@@ -122,6 +124,13 @@ class CodebaseIndex:
                 self._functions_by_name[symbol.name].append(symbol)
             elif symbol.kind == "class":
                 self._classes_by_name[symbol.name].append(symbol)
+
+        for chunk in self._manifest.chunks:
+            self._chunks_by_file[chunk.file_id].append(
+                (chunk.id, chunk.start_line, chunk.end_line)
+            )
+        for chunks in self._chunks_by_file.values():
+            chunks.sort(key=lambda item: item[1])
 
         for import_record in self._manifest.imports:
             self._imports_by_source[import_record.source_file_id].append(import_record)
@@ -455,6 +464,15 @@ class CodebaseIndex:
         related_files.discard(file_id)
         return sorted(related_files)
 
+    def chunks_for_file(self, file_id: str) -> List[Tuple[str, int, int]]:
+        """Return (chunk_id, start_line, end_line) tuples for a file in line order."""
+        return list(self._chunks_by_file.get(file_id, []))
+
+    def file_language(self, file_id: str) -> Optional[str]:
+        """Return the language recorded in the manifest for a file id, if any."""
+        entry = self._files_by_id.get(file_id)
+        return entry.language if entry else None
+
     def clear(self) -> None:
         """Clear the persisted manifest and in-memory lookups."""
         self._manifest = CoreIndexManifest.empty(
@@ -552,3 +570,7 @@ class CodebaseIndexer:
     def get_index(self) -> CodebaseIndex:
         """Get the underlying codebase index."""
         return self.index
+
+    def get_manifest(self) -> CoreIndexManifest:
+        """Return the in-memory manifest built during indexing."""
+        return self.index.manifest

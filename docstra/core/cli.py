@@ -50,7 +50,9 @@ from docstra.core.retrieval.evaluation import (
     RetrievalEvalSummary,
     evaluate_retrieval_cases,
 )
-from docstra.core.retrieval.hybrid import HybridRetriever
+from docstra.core.ingestion.fts_storage import FtsStorage
+from docstra.core.retrieval.fts import FtsRetriever
+from docstra.core.retrieval.fusion import FusionRetriever
 from docstra.core.services.initialization_service import InitializationService
 from docstra.core.services.ingestion_service import IngestionService
 from docstra.core.services.query_service import QueryService
@@ -1689,7 +1691,9 @@ def _get_persist_paths(
 def _create_retrieval_eval_runner(
     user_config: UserConfig, abs_codebase_path: Path
 ) -> Callable[[str, int], List[Dict[str, Any]]]:
-    _, chroma_path, index_path = _get_persist_paths(user_config, abs_codebase_path)
+    effective_persist_dir, chroma_path, index_path = _get_persist_paths(
+        user_config, abs_codebase_path
+    )
     core_index_path = index_path / CORE_INDEX_FILENAME
     chroma_check_file = chroma_path / "chroma.sqlite3"
     legacy_index_artifacts = CodebaseIndex.legacy_artifacts_in(index_path)
@@ -1730,10 +1734,19 @@ def _create_retrieval_eval_runner(
     code_index = code_indexer.get_index()
 
     if code_index:
-        hybrid_retriever = HybridRetriever(base_retriever, code_index)
+        fts_storage = FtsStorage(str(effective_persist_dir / "index.db"))
+        fts_retriever = FtsRetriever(fts_storage)
+        fusion_retriever = FusionRetriever(
+            dense=base_retriever,
+            fts=fts_retriever,
+            code_index=code_index,
+            rrf_k=user_config.retrieval.rrf_k,
+            fts_chunks_top_k=user_config.retrieval.fts_chunks_top_k,
+            fts_symbols_top_k=user_config.retrieval.fts_symbols_top_k,
+        )
 
         def retrieve(question: str, top_k: int) -> List[Dict[str, Any]]:
-            return hybrid_retriever.retrieve(question, n_results=top_k)
+            return fusion_retriever.retrieve(question, n_results=top_k)
 
         return retrieve
 
