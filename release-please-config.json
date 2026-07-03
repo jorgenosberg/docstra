@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "18a4a463ceff7d2fddf00a3acee70b80812430cb",
+  "packages": {
+    ".": {
+      "release-type": "python",
+      "package-name": "docstra",
+      "bump-minor-pre-major": true
+    }
+  }
+}
