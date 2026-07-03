@@ -1611,6 +1611,45 @@ def ingest(
     console.print("─" * 50)
 
 
+@app.command()
+def index(
+    codebase_path: str = typer.Argument(".", help="Path to the codebase to index"),
+    config_path: Optional[str] = typer.Option(
+        None, "--config", "-c", help="Path to the configuration file"
+    ),
+    export: Optional[str] = typer.Option(
+        None, "--export", help="Write the core index manifest JSON to this path"
+    ),
+) -> None:
+    """Build the deterministic core index (files, symbols, imports, edges).
+
+    No embeddings are generated, so no model or API access is needed.
+    Run 'docstra ingest' afterwards to add embeddings for semantic retrieval.
+    """
+    abs_codebase_path = Path(codebase_path).resolve()
+    user_config = load_or_init_config(config_path)
+
+    console.print(
+        Panel(
+            f"[{Colors.BOLD}]🗂️  Building Core Index[/]\n"
+            f"📁 [{Colors.DIM}]{abs_codebase_path}[/]",
+            style=Colors.INFO_BOLD,
+            expand=False,
+        )
+    )
+
+    ingestion_service = IngestionService(console=console)
+    success = ingestion_service.build_core_index(
+        codebase_path=str(abs_codebase_path),
+        user_config=user_config,
+        export_path=export,
+    )
+
+    if not success:
+        console.print(f"[{Colors.ERROR_BOLD}]Indexing failed.[/]")
+        raise typer.Exit(code=1)
+
+
 def format_file_link(abs_path: str, start_line, end_line) -> str:
     """Format a link with line numbers for Rich clickable links."""
     file_url = f"{quote(abs_path)}"

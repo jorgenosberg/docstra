@@ -126,26 +126,9 @@ class IngestionService:
         # Ensure persistence directory exists
         persist_directory.mkdir(parents=True, exist_ok=True)
 
-        # Get ingestion configuration
-        include_dirs = None
-        exclude_patterns = None
-        if user_config.ingestion:
-            include_dirs = user_config.ingestion.include_dirs
-            exclude_patterns = (
-                user_config.ingestion.exclude_patterns
-                or user_config.processing.exclude_patterns
-            )
-        else:
-            exclude_patterns = user_config.processing.exclude_patterns
+        _, exclude_patterns = self._ingestion_patterns(user_config)
 
         # Initialize components
-        chunking_pipeline = ChunkingPipeline(
-            [
-                SyntaxAwareChunking(),
-                SemanticChunking(max_chunk_size=user_config.processing.chunk_size),
-            ]
-        )
-
         embedding_generator = EmbeddingFactory.create_embedding_generator(
             embedding_type=user_config.embedding.provider,
             model_name=user_config.embedding.model_name,
@@ -170,6 +153,156 @@ class IngestionService:
             embedding_backend="chroma",
             embedding_model=user_config.embedding.model_name,
             source_kinds=["tree-sitter"],
+        )
+
+        prepared = self._prepare_documents(
+            codebase_path_abs,
+            user_config,
+            show_embedding_estimate=True,
+        )
+        if prepared is None:
+            return False
+        documents, errors = prepared
+
+        # Index documents (this is where embeddings are generated)
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=self.console,
+        ) as progress:
+            task_index = progress.add_task(
+                "[cyan]Generating embeddings and indexing...", total=None
+            )
+
+            doc_indexer.index_documents(documents)
+            code_indexer.index_documents(documents)
+
+            manifest = code_indexer.get_manifest()
+            fts_storage.add_symbols(list(manifest.symbols))
+
+            progress.update(
+                task_index, completed=True, description="[green]Indexed all documents"
+            )
+
+        # Show completion summary with embedding usage
+        self._show_completion_summary(
+            len(documents),
+            errors["processing"],
+            errors["parsing"],
+            errors["chunking"],
+            embedding_generator,
+        )
+
+        return True
+
+    def build_core_index(
+        self,
+        codebase_path: str,
+        user_config: UserConfig,
+        export_path: Optional[str] = None,
+    ) -> bool:
+        """Build the deterministic core index manifest without embeddings.
+
+        Runs the collect, process, parse, and chunk pipeline, then persists the
+        core manifest and lexical symbol index. Embedding generation stays in
+        ingest_codebase; this path needs no model or API access.
+
+        Args:
+            codebase_path: Path to the codebase
+            user_config: User configuration
+            export_path: Optional path to write the manifest JSON to
+
+        Returns:
+            True if the index was built, False otherwise
+        """
+        codebase_path_abs = Path(codebase_path).resolve()
+        persist_directory = self._resolve_persist_directory(
+            codebase_path_abs, user_config.storage.persist_directory
+        )
+        persist_directory.mkdir(parents=True, exist_ok=True)
+
+        index_path = persist_directory / "index"
+        if CodebaseIndex.legacy_artifacts_in(index_path):
+            self.console.print(
+                "[yellow]Legacy index artifacts detected. Rebuilding the index in the new core manifest format.[/]"
+            )
+            shutil.rmtree(index_path)
+
+        _, exclude_patterns = self._ingestion_patterns(user_config)
+
+        prepared = self._prepare_documents(codebase_path_abs, user_config)
+        if prepared is None:
+            return False
+        documents, _ = prepared
+
+        code_indexer = CodebaseIndexer(
+            index_directory=str(index_path),
+            exclude_patterns=exclude_patterns or [],
+            codebase_root=str(codebase_path_abs),
+            embedding_backend="chroma",
+            embedding_model=user_config.embedding.model_name,
+            source_kinds=["tree-sitter"],
+        )
+        code_indexer.index_documents(documents)
+
+        manifest = code_indexer.get_manifest()
+        fts_storage = FtsStorage(str(persist_directory / "index.db"))
+        fts_storage.add_symbols(list(manifest.symbols))
+
+        resolved_imports = sum(
+            1 for record in manifest.imports if record.target_file_id
+        )
+        self.console.print(
+            Panel(
+                f"[bold green]✓ Core index built[/]\n"
+                f"Files: {len(manifest.files)} • Chunks: {len(manifest.chunks)} • Symbols: {len(manifest.symbols)}\n"
+                f"Imports: {len(manifest.imports)} ({resolved_imports} resolved) • Edges: {len(manifest.edges)}",
+                title="[bold green]Index Complete[/]",
+                expand=False,
+            )
+        )
+
+        if export_path:
+            export_file = Path(export_path).resolve()
+            export_file.parent.mkdir(parents=True, exist_ok=True)
+            export_file.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+            self.console.print(f"[cyan]Manifest exported to[/] [bold]{export_file}[/]")
+
+        return True
+
+    @staticmethod
+    def _ingestion_patterns(
+        user_config: UserConfig,
+    ) -> tuple[Optional[List[str]], Optional[List[str]]]:
+        """Return (include_dirs, exclude_patterns) from the configuration."""
+        if user_config.ingestion:
+            return (
+                user_config.ingestion.include_dirs,
+                user_config.ingestion.exclude_patterns
+                or user_config.processing.exclude_patterns,
+            )
+        return None, user_config.processing.exclude_patterns
+
+    def _prepare_documents(
+        self,
+        codebase_path_abs: Path,
+        user_config: UserConfig,
+        show_embedding_estimate: bool = False,
+    ) -> Optional[tuple[List[Document], Dict[str, int]]]:
+        """Collect files and run the deterministic pipeline: process, parse, chunk.
+
+        Returns the processed documents and an error-count dict, or None when
+        no files were found.
+        """
+        include_dirs, exclude_patterns = self._ingestion_patterns(user_config)
+
+        chunking_pipeline = ChunkingPipeline(
+            [
+                SyntaxAwareChunking(),
+                SemanticChunking(max_chunk_size=user_config.processing.chunk_size),
+            ]
         )
 
         # Collect files with suppressed logging
@@ -197,18 +330,22 @@ class IngestionService:
 
         if not file_paths:
             self.console.print("[yellow]No files found to ingest.[/]")
-            return False
+            return None
 
         # Show file collection summary
         self._show_collection_summary(file_paths, codebase_path_abs)
 
         # Show embedding cost estimate if using OpenAI
-        if user_config.embedding.provider.lower() == "openai":
+        if (
+            show_embedding_estimate
+            and user_config.embedding.provider.lower() == "openai"
+        ):
             self._show_embedding_cost_estimate(
                 file_paths, user_config.embedding.model_name
             )
 
-        # Process, parse, chunk, and index files
+        errors = {"processing": 0, "parsing": 0, "chunking": 0}
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -222,18 +359,17 @@ class IngestionService:
             )
 
             documents: List[Document] = []
-            processing_errors = 0
             for file_path in file_paths:
                 try:
                     document = self.document_processor.process(str(file_path))
                     documents.append(document)
                 except Exception as e:
-                    processing_errors += 1
-                    if processing_errors <= 3:  # Only show first few errors
+                    errors["processing"] += 1
+                    if errors["processing"] <= 3:  # Only show first few errors
                         self.console.print(
                             f"[yellow]Warning:[/] Failed to process {file_path}: {str(e)}"
                         )
-                    elif processing_errors == 4:
+                    elif errors["processing"] == 4:
                         self.console.print(
                             f"[yellow]Warning:[/] ... and {len(file_paths) - len(documents) - 3} more processing errors"
                         )
@@ -244,13 +380,12 @@ class IngestionService:
                 "[cyan]Parsing code structure...", total=len(documents)
             )
 
-            parsing_errors = 0
             for document in documents:
                 try:
                     self.code_parser.parse_document(document)
                 except Exception as e:
-                    parsing_errors += 1
-                    if parsing_errors <= 3:  # Only show first few errors
+                    errors["parsing"] += 1
+                    if errors["parsing"] <= 3:  # Only show first few errors
                         self.console.print(
                             f"[yellow]Warning:[/] Failed to parse {document.metadata.filepath}: {str(e)}"
                         )
@@ -261,43 +396,18 @@ class IngestionService:
                 "[cyan]Chunking documents...", total=len(documents)
             )
 
-            chunking_errors = 0
             for document in documents:
                 try:
                     chunking_pipeline.process(document)
                 except Exception as e:
-                    chunking_errors += 1
-                    if chunking_errors <= 3:  # Only show first few errors
+                    errors["chunking"] += 1
+                    if errors["chunking"] <= 3:  # Only show first few errors
                         self.console.print(
                             f"[yellow]Warning:[/] Failed to chunk {document.metadata.filepath}: {str(e)}"
                         )
                 progress.update(task_chunk, advance=1)
 
-            # Index documents (this is where embeddings are generated)
-            task_index = progress.add_task(
-                "[cyan]Generating embeddings and indexing...", total=None
-            )
-
-            doc_indexer.index_documents(documents)
-            code_indexer.index_documents(documents)
-
-            manifest = code_indexer.get_manifest()
-            fts_storage.add_symbols(list(manifest.symbols))
-
-            progress.update(
-                task_index, completed=True, description="[green]Indexed all documents"
-            )
-
-        # Show completion summary with embedding usage
-        self._show_completion_summary(
-            len(documents),
-            processing_errors,
-            parsing_errors,
-            chunking_errors,
-            embedding_generator,
-        )
-
-        return True
+        return documents, errors
 
     def _show_embedding_cost_estimate(
         self, file_paths: List[Path], model_name: str
