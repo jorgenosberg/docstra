@@ -658,16 +658,22 @@ class DocumentationGenerator:
                 additional_context=file_prompt,
             )
 
-            # Save file documentation
-            rel_path = os.path.relpath(document.metadata.filepath, start=".")
+            # Save file documentation with a deterministic cross-reference section
+            rel_path = self._doc_relative_path(document.metadata.filepath)
             doc_path = self.output_dir / "docs" / "api" / f"{rel_path}.md"
 
             os.makedirs(doc_path.parent, exist_ok=True)
 
+            cross_refs_section = self._render_cross_references_section(
+                self._get_file_cross_references(document)
+            )
             with open(doc_path, "w", encoding="utf-8") as f:
                 f.write(
-                    file_content
-                    or f"# {Path(document.metadata.filepath).name}\n\nDocumentation generation failed."
+                    (
+                        file_content
+                        or f"# {Path(document.metadata.filepath).name}\n\nDocumentation generation failed."
+                    )
+                    + cross_refs_section
                 )
 
             return file_content or ""
@@ -675,6 +681,18 @@ class DocumentationGenerator:
         except Exception:
             # Don't print here as it's handled in the calling method
             return ""
+
+    def _doc_relative_path(self, filepath: str) -> str:
+        """Map a source file path to a repo-relative doc path inside output_dir."""
+        if self.code_index:
+            normalized = self.code_index.normalize_file_id(filepath)
+            if normalized and ".." not in Path(normalized).parts:
+                return normalized
+
+        rel_path = os.path.relpath(filepath, start=".")
+        if ".." in Path(rel_path).parts:
+            return Path(filepath).name
+        return rel_path
 
     def _build_file_context(self, document: Document) -> str:
         """Build rich context information for a file."""
@@ -701,8 +719,8 @@ class DocumentationGenerator:
             if dependencies:
                 context_parts.append(f"**Dependencies**: {', '.join(dependencies[:5])}")
 
-        # Add similar code examples from ChromaDB
-        if self.chroma_retriever:
+        # Add similar code examples from retrieval (similarity, not references)
+        if self.chroma_retriever or self.fusion_retriever:
             similar_examples = self._get_similar_code_examples(document)
             if similar_examples:
                 examples_text = []
@@ -714,13 +732,12 @@ class DocumentationGenerator:
                     f"**Similar Code Examples**:\n{chr(10).join(examples_text)}"
                 )
 
-        # Add cross-references
-        if self.fusion_retriever:
+        # Add graph-verified cross-references from the code index
+        if self.code_index:
             cross_refs = self._get_file_cross_references(document)
-            if cross_refs:
-                context_parts.append(
-                    f"**Cross References**: {', '.join(cross_refs[:5])}"
-                )
+            imported_by = cross_refs.get("imported_by", [])
+            if imported_by:
+                context_parts.append(f"**Imported By**: {', '.join(imported_by[:5])}")
 
         return (
             "\n\n".join(context_parts)
@@ -729,8 +746,9 @@ class DocumentationGenerator:
         )
 
     def _get_similar_code_examples(self, document: Document) -> List[Dict[str, Any]]:
-        """Get similar code examples using semantic search."""
-        if not self.chroma_retriever:
+        """Get similar code examples using retrieval (fusion when available)."""
+        retriever = self.fusion_retriever or self.chroma_retriever
+        if not retriever:
             return []
 
         try:
@@ -751,7 +769,7 @@ class DocumentationGenerator:
                 else f"{document.metadata.language} implementation"
             )
 
-            chunks = self.chroma_retriever.retrieve_chunks(query=query, n_results=10)
+            chunks = retriever.retrieve_chunks(query=query, n_results=10)
 
             similar_examples = []
             for chunk in chunks:
@@ -772,35 +790,35 @@ class DocumentationGenerator:
         except Exception:
             return []
 
-    def _get_file_cross_references(self, document: Document) -> List[str]:
-        """Get cross-references for a file."""
-        if not self.chroma_retriever:
-            return []
+    def _get_file_cross_references(self, document: Document) -> Dict[str, List[str]]:
+        """Get graph-verified cross-references for a file, keyed by direction."""
+        if not self.code_index:
+            return {}
 
         try:
-            cross_refs = []
-
-            # Look for imports and usages
-            for symbol in (document.metadata.classes + document.metadata.functions)[:5]:
-                chunks = self.chroma_retriever.retrieve_chunks(
-                    query=symbol, n_results=5
-                )
-                for chunk in chunks:
-                    chunk_file = chunk.get("metadata", {}).get("document_id", "")
-                    if (
-                        chunk_file != document.metadata.filepath
-                        and chunk_file not in cross_refs
-                    ):
-                        cross_refs.append(chunk_file)
-                        if len(cross_refs) >= 5:
-                            break
-                if len(cross_refs) >= 5:
-                    break
-
-            return cross_refs
-
+            return self.code_index.get_file_cross_references(document.metadata.filepath)
         except Exception:
-            return []
+            return {}
+
+    @staticmethod
+    def _render_cross_references_section(cross_refs: Dict[str, List[str]]) -> str:
+        """Render a deterministic cross-references section from graph data."""
+        imports = sorted(cross_refs.get("imports", []))
+        imported_by = sorted(cross_refs.get("imported_by", []))
+        if not imports and not imported_by:
+            return ""
+
+        lines = ["", "", "## Cross-references", ""]
+        if imports:
+            lines.append("**Imports:**")
+            lines.extend(f"- `{file_id}`" for file_id in imports)
+        if imported_by:
+            if imports:
+                lines.append("")
+            lines.append("**Imported by:**")
+            lines.extend(f"- `{file_id}`" for file_id in imported_by)
+        lines.append("")
+        return "\n".join(lines)
 
     def _generate_user_guides(self) -> None:
         """Generate user guides and tutorials."""
@@ -962,34 +980,28 @@ class DocumentationGenerator:
             )
 
     def _generate_cross_references(self) -> None:
-        """Generate cross-reference links between documentation files."""
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=self.console,
-            transient=False,
-        ) as progress:
-            cross_ref_task = progress.add_task(
-                f"[{Colors.INFO}]🔗 Generating cross-references...", total=None
+        """Populate the cross-reference map from the code index import graph."""
+        if not self.code_index:
+            self.console.print(
+                f"[{Colors.DIM}]🔗 No code index available, skipping cross-references[/]"
             )
+            return
 
-            # This would scan all generated documentation and add cross-reference links
-            # Implementation would depend on the specific cross-referencing strategy
-            progress.update(
-                cross_ref_task,
-                description=f"[{Colors.INFO}]🔗 Scanning documentation files...",
+        linked_files = 0
+        for filepath, document in self.processed_documents.items():
+            cross_refs = self._get_file_cross_references(document)
+            combined = sorted(
+                set(cross_refs.get("imports", []))
+                | set(cross_refs.get("imported_by", []))
             )
+            if combined:
+                self.cross_references[filepath] = combined
+                linked_files += 1
 
-            # Placeholder for actual cross-reference generation
-            time.sleep(0.5)  # Simulate work
-
-            progress.update(
-                cross_ref_task,
-                completed=True,
-                description=f"[{Colors.SUCCESS}]🔗 Cross-references generated",
-            )
-
-        self.console.print(f"[{Colors.DIM}]🔗 Cross-reference generation completed[/]")
+        self.console.print(
+            f"[{Colors.DIM}]🔗 Resolved import-graph cross-references for "
+            f"{linked_files} of {len(self.processed_documents)} files[/]"
+        )
 
     def _build_documentation_site(self) -> None:
         """Build the final documentation site."""
@@ -1196,12 +1208,22 @@ class DocumentationGenerator:
     def _get_cross_references_context(self, document: Document) -> str:
         """Get cross-references context for a document."""
         cross_refs = self._get_file_cross_references(document)
-        # Convert list of strings to list of dicts for proper formatting
         cross_refs_dicts = [
-            {"type": "reference", "filepath": ref, "context": "Cross-referenced"}
-            for ref in cross_refs
+            {
+                "type": "imports",
+                "filepath": ref,
+                "context": "resolved import edge from the code index",
+            }
+            for ref in cross_refs.get("imports", [])
+        ] + [
+            {
+                "type": "imported by",
+                "filepath": ref,
+                "context": "resolved import edge from the code index",
+            }
+            for ref in cross_refs.get("imported_by", [])
         ]
-        return PromptFormatters.format_cross_references(cross_refs_dicts)
+        return PromptFormatters.format_cross_references(cross_refs_dicts, max_refs=10)
 
     def _get_fallback_overview(self) -> str:
         """Get fallback project overview content."""
