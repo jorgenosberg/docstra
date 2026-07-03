@@ -442,6 +442,20 @@ class CodebaseIndex:
         file_id = self.normalize_file_id(filepath)
         return list(dict.fromkeys(self._dependents_by_target.get(file_id, [])))
 
+    def get_file_cross_references(self, filepath: str) -> Dict[str, List[str]]:
+        """Return graph-verified cross-references for a file, keyed by direction.
+
+        Every entry comes from resolved import edges in the manifest, so each
+        reference is verifiable by construction. New directions (for example
+        symbol references from a future SCIP layer) can be added as new keys
+        without breaking consumers.
+        """
+        file_id = self.normalize_file_id(filepath)
+        return {
+            "imports": self.get_file_dependencies(file_id),
+            "imported_by": self.get_dependents(file_id),
+        }
+
     def get_related_files(self, filepath: str) -> List[str]:
         """Find files related to a given file."""
         file_id = self.normalize_file_id(filepath)
