@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/jorgenosberg/docstra/compare/docstra-v0.3.0...docstra-v0.3.1) (2026-07-06)
+
+
+### Features
+
+* **docs:** add deterministic documentation checks and check-docs command ([d172a4f](https://github.com/jorgenosberg/docstra/commit/d172a4f94bb8e4f7f1f0dd30dd6f6256ae58e2b9))
+* **docs:** make docstra update regenerate only graph-impacted pages ([ff1366a](https://github.com/jorgenosberg/docstra/commit/ff1366af9e7c4005a2d405f4af27120f7a62582c))
+
 ## [0.3.0](https://github.com/jorgenosberg/docstra/compare/docstra-v0.2.0...docstra-v0.3.0) (2026-07-03)
 
 
