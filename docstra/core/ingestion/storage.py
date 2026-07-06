@@ -6,6 +6,7 @@ Storage for document embeddings using ChromaDB.
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping, Sequence
 from typing import Any, Dict, List, Optional, cast
@@ -16,6 +17,10 @@ from chromadb.types import Metadata
 from docstra.core.document_processing.document import Document
 from docstra.core.indexing.model import make_chunk_id, normalize_file_id
 from docstra.core.ingestion.fts_storage import FtsStorage
+
+# ChromaDB's telemetry ignores the anonymized_telemetry setting in some
+# versions and logs a posthog incompatibility error on every operation.
+logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
 
 ChromaScalar = str | int | float | bool
 ChromaMetadata = Metadata
@@ -36,8 +41,12 @@ class ChromaDBStorage:
         # Ensure the directory exists
         os.makedirs(persist_directory, exist_ok=True)
 
-        # Initialize ChromaDB client
-        self.client = chromadb.PersistentClient(path=persist_directory)
+        # Initialize ChromaDB client. Telemetry is disabled: it phones home
+        # and its posthog client prints noisy errors on version mismatches.
+        self.client = chromadb.PersistentClient(
+            path=persist_directory,
+            settings=chromadb.config.Settings(anonymized_telemetry=False),
+        )
 
         # Create collections for different types of data
         self.document_collection = self.client.get_or_create_collection(
@@ -499,11 +508,19 @@ class DocumentIndexer:
             chunk_contents = []
             chunk_metadatas = []
             chunk_embeddings = []
+            chunk_start_lines = []
+            chunk_end_lines = []
 
-            # Process each chunk
+            # Process each chunk. The chunker can emit two chunks covering
+            # the same line range; keep the first, since duplicate IDs make
+            # ChromaDB reject the whole batch.
+            seen_chunk_ids: set[str] = set()
             for chunk in document.chunks:
                 # Generate chunk ID
                 chunk_id = make_chunk_id(doc_id, chunk.start_line, chunk.end_line)
+                if chunk_id in seen_chunk_ids:
+                    continue
+                seen_chunk_ids.add(chunk_id)
 
                 # Generate chunk embedding
                 chunk_embedding = self.embedding_generator.generate_embedding(
@@ -532,6 +549,8 @@ class DocumentIndexer:
                 chunk_contents.append(chunk.content)
                 chunk_metadatas.append(chroma_chunk_metadata)
                 chunk_embeddings.append(chunk_embedding)
+                chunk_start_lines.append(chunk.start_line)
+                chunk_end_lines.append(chunk.end_line)
 
             # Add chunks to storage in batch
             if chunk_ids:
@@ -548,8 +567,8 @@ class DocumentIndexer:
                         chunk_ids=chunk_ids,
                         file_ids=[doc_id] * len(chunk_ids),
                         languages=[str(document.metadata.language)] * len(chunk_ids),
-                        start_lines=[chunk.start_line for chunk in document.chunks],
-                        end_lines=[chunk.end_line for chunk in document.chunks],
+                        start_lines=chunk_start_lines,
+                        end_lines=chunk_end_lines,
                         contents=chunk_contents,
                     )
 

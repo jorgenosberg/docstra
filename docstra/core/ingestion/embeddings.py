@@ -193,6 +193,7 @@ class OllamaEmbeddingGenerator(EmbeddingGenerator):
         model_name: str = DEFAULT_OLLAMA_EMBEDDING_MODEL,
         api_base: str | None = None,
         timeout: float = 30.0,
+        max_chars: int = 8000,
     ) -> None:
         super().__init__()
         self.model_name = model_name
@@ -200,11 +201,27 @@ class OllamaEmbeddingGenerator(EmbeddingGenerator):
             "/"
         ) or "http://localhost:11434"
         self.timeout = timeout
+        # Ollama returns 400 when an input exceeds the embedding model's
+        # context length (its truncate flag does not reliably apply), so
+        # truncate client-side. Token density varies by content, so on a
+        # context-length 400 the cap halves and the request retries.
+        self.max_chars = max_chars
 
-    def _embed_with_current_endpoint(self, texts: List[str]) -> List[List[float]]:
+    @staticmethod
+    def _is_context_length_error(response: requests.Response) -> bool:
+        if response.status_code != 400:
+            return False
+        return "context length" in response.text.lower()
+
+    def _embed_with_current_endpoint(
+        self, texts: List[str], max_chars: Optional[int] = None
+    ) -> List[List[float]]:
+        cap = max_chars or self.max_chars
+        truncated = [text[:cap] for text in texts]
         payload: Dict[str, Any] = {
             "model": self.model_name,
-            "input": texts if len(texts) > 1 else texts[0],
+            "input": truncated if len(truncated) > 1 else truncated[0],
+            "truncate": True,
         }
         response = requests.post(
             f"{self.api_base}/api/embed",
@@ -213,6 +230,8 @@ class OllamaEmbeddingGenerator(EmbeddingGenerator):
         )
         if response.status_code == 404:
             raise FileNotFoundError("Ollama /api/embed endpoint is unavailable")
+        if self._is_context_length_error(response) and cap > 500:
+            return self._embed_with_current_endpoint(texts, cap // 2)
         response.raise_for_status()
         data = response.json()
         if "embeddings" not in data:
@@ -222,11 +241,17 @@ class OllamaEmbeddingGenerator(EmbeddingGenerator):
     def _embed_with_legacy_endpoint(self, texts: List[str]) -> List[List[float]]:
         embeddings: List[List[float]] = []
         for text in texts:
-            response = requests.post(
-                f"{self.api_base}/api/embeddings",
-                json={"model": self.model_name, "prompt": text},
-                timeout=self.timeout,
-            )
+            cap = self.max_chars
+            while True:
+                response = requests.post(
+                    f"{self.api_base}/api/embeddings",
+                    json={"model": self.model_name, "prompt": text[:cap]},
+                    timeout=self.timeout,
+                )
+                if self._is_context_length_error(response) and cap > 500:
+                    cap //= 2
+                    continue
+                break
             response.raise_for_status()
             data = response.json()
             if "embedding" not in data:

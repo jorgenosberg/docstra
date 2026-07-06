@@ -117,9 +117,38 @@ def test_ollama_embedding_generator_uses_embed_endpoint(monkeypatch) -> None:
     assert calls == [
         (
             "http://localhost:11434/api/embed",
-            {"model": "nomic-embed-text", "input": ["alpha", "beta"]},
+            {
+                "model": "nomic-embed-text",
+                "input": ["alpha", "beta"],
+                "truncate": True,
+            },
         )
     ]
+
+
+def test_ollama_embedding_generator_truncates_long_inputs(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"embeddings": [[1.0, 0.0]]}
+
+    def fake_post(url: str, *, json: dict[str, object], timeout: float) -> FakeResponse:
+        del url, timeout
+        captured.update(json)
+        return FakeResponse()
+
+    monkeypatch.setattr("requests.post", fake_post)
+
+    generator = OllamaEmbeddingGenerator(model_name="nomic-embed-text", max_chars=100)
+    generator.generate_embedding("x" * 5000)
+
+    assert len(captured["input"]) == 100
 
 
 def test_ollama_embedding_generator_falls_back_to_legacy_endpoint(monkeypatch) -> None:
@@ -164,7 +193,7 @@ def test_ollama_embedding_generator_falls_back_to_legacy_endpoint(monkeypatch) -
     assert calls == [
         (
             "http://localhost:11434/api/embed",
-            {"model": "legacy-model", "input": ["alpha", "beta"]},
+            {"model": "legacy-model", "input": ["alpha", "beta"], "truncate": True},
         ),
         (
             "http://localhost:11434/api/embeddings",

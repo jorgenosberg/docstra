@@ -682,9 +682,10 @@ class FileCollector:
             "env",
         ]
         for pattern in problem_patterns:
-            # Check if any directories with this pattern have files
+            # Check if any directories with this pattern have files.
+            # Match whole path components so '.github' does not match '.git'.
             dir_counts = cast(Dict[str, int], self.stats["dir_counts"])
-            matching_dirs = [d for d in dir_counts if pattern in d]
+            matching_dirs = [d for d in dir_counts if pattern in Path(d).parts]
             if matching_dirs:
                 total_files = sum(dir_counts[d] for d in matching_dirs)
                 self.logger.warning(
