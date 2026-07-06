@@ -14,6 +14,7 @@ import anthropic
 from anthropic.types import TextBlock
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from docstra.core.config.settings import DEFAULT_ANTHROPIC_MODEL
 from docstra.core.llm.prompt import PromptBuilder
 from docstra.core.tracking.llm_tracker import (
     UniversalLLMTracker,
@@ -26,7 +27,7 @@ class AnthropicClient:
 
     def __init__(
         self,
-        model_name: str = "claude-3-opus-20240229",
+        model_name: str = DEFAULT_ANTHROPIC_MODEL,
         api_key: Optional[str] = None,
         max_tokens: int = 4000,
         temperature: float = 0.7,

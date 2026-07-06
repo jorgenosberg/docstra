@@ -124,6 +124,7 @@ class DocumentationGenerator:
         style_guide: Optional[str] = None,
         persist_directory: Optional[Union[str, Path]] = None,
         user_config: Optional[Any] = None,
+        overview_llm_client: Optional[Any] = None,
     ):
         """Initialize the enhanced documentation generator.
 
@@ -141,8 +142,12 @@ class DocumentationGenerator:
             style_guide: Custom style guide for documentation
             persist_directory: Persist directory root (needed to locate index.db for FTS)
             user_config: UserConfig instance for retrieval settings
+            overview_llm_client: Optional larger-model client for overview,
+                module, guide, and API index pages; file pages always use
+                llm_client
         """
         self.llm_client = llm_client
+        self.overview_llm_client = overview_llm_client or llm_client
         self.output_dir = Path(output_dir)
         self.repo_map = repo_map
         self.chroma_retriever = chroma_retriever
@@ -461,7 +466,7 @@ class DocumentationGenerator:
 
             # Generate content using LLM
             try:
-                overview_content = self.llm_client.document_code(
+                overview_content = self.overview_llm_client.document_code(
                     code="", language="markdown", additional_context=overview_prompt
                 )
 
@@ -575,7 +580,7 @@ class DocumentationGenerator:
         )
 
         try:
-            module_content = self.llm_client.document_code(
+            module_content = self.overview_llm_client.document_code(
                 code="", language="markdown", additional_context=module_prompt
             )
 
@@ -602,6 +607,7 @@ class DocumentationGenerator:
 
     def _generate_file_documentation(self, documents: List[Document]) -> None:
         """Generate documentation for individual files."""
+        phase_start = time.time()
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -650,14 +656,19 @@ class DocumentationGenerator:
                             f"[{Colors.WARNING}]Warning: Failed to generate docs for {doc.metadata.filepath}: {e}[/]"
                         )
 
-        # Show completion summary
+        # Show completion summary with throughput so local models can be compared
         success_count = (
             len(documents) - failed_count
             if "failed_count" in locals()
             else len(documents)
         )
+        elapsed = time.time() - phase_start
+        per_page = elapsed / success_count if success_count else 0.0
         self.console.print(
-            f"[{Colors.DIM}]📄 File documentation: {success_count} successful, {failed_count if 'failed_count' in locals() else 0} failed[/]"
+            f"[{Colors.DIM}]📄 File documentation: {success_count} successful, "
+            f"{failed_count if 'failed_count' in locals() else 0} failed • "
+            f"{elapsed:.1f}s total, {per_page:.1f}s per page "
+            f"({self.max_workers} workers)[/]"
         )
 
     def _generate_single_file_doc(self, document: Document) -> str:
@@ -887,7 +898,7 @@ class DocumentationGenerator:
         )
 
         try:
-            guide_content = self.llm_client.document_code(
+            guide_content = self.overview_llm_client.document_code(
                 code="", language="markdown", additional_context=guide_prompt
             )
 
@@ -984,7 +995,7 @@ class DocumentationGenerator:
         )
 
         try:
-            api_content = self.llm_client.document_code(
+            api_content = self.overview_llm_client.document_code(
                 code="", language="markdown", additional_context=api_prompt
             )
 

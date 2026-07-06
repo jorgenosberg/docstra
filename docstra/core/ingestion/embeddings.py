@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import requests
 import tiktoken
 
+from docstra.core.config.settings import DEFAULT_OLLAMA_EMBEDDING_MODEL
 from docstra.core.document_processing.document import Document
 from docstra.core.indexing.model import make_chunk_id, normalize_file_id
 
@@ -184,7 +185,7 @@ class OllamaEmbeddingGenerator(EmbeddingGenerator):
 
     def __init__(
         self,
-        model_name: str = "llama3.2",
+        model_name: str = DEFAULT_OLLAMA_EMBEDDING_MODEL,
         api_base: str | None = None,
         timeout: float = 30.0,
     ) -> None:
@@ -260,7 +261,7 @@ class EmbeddingFactory:
                 api_base=kwargs.get("api_base"),
             )
         if embedding_type.lower() == "ollama":
-            model_name = kwargs.get("model_name", "llama3.2")
+            model_name = kwargs.get("model_name", DEFAULT_OLLAMA_EMBEDDING_MODEL)
             return OllamaEmbeddingGenerator(
                 model_name=model_name,
                 api_base=kwargs.get("api_base"),

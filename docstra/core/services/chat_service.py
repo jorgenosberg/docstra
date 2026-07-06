@@ -12,12 +12,9 @@ from typing import List, Dict, Any, Optional
 
 from rich.console import Console
 
-from docstra.core.config.settings import UserConfig, ModelProvider
+from docstra.core.config.settings import UserConfig
 from docstra.core.llm.base import LLMClient  # Assuming a base class or common interface
-from docstra.core.llm.anthropic import AnthropicClient
-from docstra.core.llm.local import LocalModelClient
-from docstra.core.llm.ollama import OllamaClient
-from docstra.core.llm.openai import OpenAIClient
+from docstra.core.llm.factory import create_llm_client
 from docstra.core.services.query_service import QueryService
 from docstra.core.utils.token_counter import (
     get_token_counter,
@@ -34,44 +31,11 @@ MESSAGES_TABLE = "chat_messages"
 def _get_llm_client_for_chat_service(
     config: UserConfig, callbacks: Optional[List[Any]] = None
 ):
-    """
-    Helper to get LLM client based on config.
-    """
-    provider = config.model.provider
-
-    if provider == ModelProvider.ANTHROPIC:
-        return AnthropicClient(
-            model_name=config.model.model_name_chat
-            or config.model.model_name,  # Prefer chat-specific model
-            api_key=config.model.api_key,
-            max_tokens=config.model.max_tokens,
-            temperature=config.model.temperature,
-        )
-    elif provider == ModelProvider.OPENAI:
-        return OpenAIClient(
-            model_name=config.model.model_name_chat or config.model.model_name,
-            api_key=config.model.api_key,
-            max_tokens=config.model.max_tokens,
-            temperature=config.model.temperature,
-        )
-    elif provider == ModelProvider.OLLAMA:
-        return OllamaClient(
-            model_name=config.model.model_name_chat or config.model.model_name,
-            api_base=config.model.api_base or "http://localhost:11434",
-            max_tokens=config.model.max_tokens,
-            temperature=config.model.temperature,
-            validate_connection=False,  # Don't validate during service creation
-        )
-    elif provider == ModelProvider.LOCAL:
-        return LocalModelClient(
-            model_name=config.model.model_name_chat or config.model.model_name,
-            model_path=config.model.model_path,
-            max_tokens=config.model.max_tokens,
-            temperature=config.model.temperature,
-            device=config.model.device,
-        )
-    else:
-        raise ValueError(f"Unsupported model provider in ChatService: {provider}")
+    """Build the chat-tier LLM client (prefers model_name_chat)."""
+    del callbacks
+    return create_llm_client(
+        config, model_name=config.model.model_name_chat or config.model.model_name
+    )
 
 
 class ChatService:

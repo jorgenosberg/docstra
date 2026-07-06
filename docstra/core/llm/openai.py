@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Union
 import openai
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from docstra.core.config.settings import DEFAULT_OPENAI_MODEL
 from docstra.core.llm.prompt import PromptBuilder
 from docstra.core.tracking.llm_tracker import (
     UniversalLLMTracker,
@@ -25,7 +26,7 @@ class OpenAIClient:
 
     def __init__(
         self,
-        model_name: str = "gpt-4-turbo",
+        model_name: str = DEFAULT_OPENAI_MODEL,
         api_key: Optional[str] = None,
         max_tokens: int = 4000,
         temperature: float = 0.7,

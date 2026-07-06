@@ -33,11 +33,7 @@ from docstra.core.ingestion.storage import ChromaDBStorage
 from docstra.core.llm.base import LLMClient
 from docstra.core.retrieval.chroma import ChromaRetriever
 
-# Using the same LLM client factory as ChatService for consistency
-# This assumes _get_llm_client_for_chat_service is suitable or will be generalized
-from docstra.core.services.chat_service import (
-    _get_llm_client_for_chat_service as _get_llm_client_for_doc_service,
-)
+from docstra.core.llm.factory import create_llm_client
 
 # Import incremental documentation components
 from docstra.core.documentation.dependencies import DocumentationDependencyTracker
@@ -78,9 +74,13 @@ class DocumentationService:
         self.console = console or Console()
         self.callbacks = callbacks
 
-        self.llm_client: LLMClient = _get_llm_client_for_doc_service(
-            self.user_config, self.callbacks
-        )
+        self.llm_client: LLMClient = create_llm_client(self.user_config)
+        # Optional larger model for overview/module/guide pages
+        self.overview_llm_client: Optional[LLMClient] = None
+        if self.user_config.model.model_name_overview:
+            self.overview_llm_client = create_llm_client(
+                self.user_config, self.user_config.model.model_name_overview
+            )
         self.document_processor = DocumentProcessor()
 
         # Initialize incremental documentation components
@@ -225,6 +225,7 @@ class DocumentationService:
 
         doc_generator = DocumentationGenerator(
             llm_client=self.llm_client,
+            overview_llm_client=self.overview_llm_client,
             output_dir=output_dir,
             repo_map=repo_map,
             chroma_retriever=chroma_retriever,

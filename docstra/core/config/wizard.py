@@ -10,6 +10,8 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from docstra.core.config.settings import (
+    DEFAULT_OLLAMA_EMBEDDING_MODEL,
+    DEFAULT_OLLAMA_MODEL,
     ConfigManager,
     ModelProvider,
     UserConfig,
@@ -156,7 +158,7 @@ class ConfigWizard:
                 name="Model Name",
                 path="model.model_name",
                 description="Name of the model to use",
-                default="llama3.2",
+                default=DEFAULT_OLLAMA_MODEL,
                 required=True,
                 scope=ConfigScope.BOTH,
             )
@@ -217,8 +219,8 @@ class ConfigWizard:
                 name="Embedding Provider",
                 path="embedding.provider",
                 description="Provider for embeddings",
-                choices=["huggingface", "openai", "ollama"],
-                default="huggingface",
+                choices=["ollama", "huggingface", "openai"],
+                default="ollama",
                 scope=ConfigScope.BOTH,
             )
         )
@@ -227,8 +229,8 @@ class ConfigWizard:
             ConfigField(
                 name="Embedding Model",
                 path="embedding.model_name",
-                description="Name of the embedding model",
-                default="all-MiniLM-L6-v2",
+                description="Name of the embedding model (changing it requires re-running 'docstra ingest')",
+                default=DEFAULT_OLLAMA_EMBEDDING_MODEL,
                 scope=ConfigScope.BOTH,
             )
         )

@@ -7,17 +7,28 @@ Ollama integration for LLM interactions.
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any, Dict, Generator, List, Union, Optional
 
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from docstra.core.config.settings import DEFAULT_OLLAMA_MODEL
 from docstra.core.llm.prompt import PromptBuilder
 from docstra.core.tracking.llm_tracker import (
     UniversalLLMTracker,
     get_global_tracker,
 )
+
+# Reasoning block emitted by thinking models (Qwen3, DeepSeek-R1). It must
+# never end up in generated documentation or chat answers.
+THINK_BLOCK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+
+
+def strip_think_blocks(text: str) -> str:
+    """Remove reasoning blocks from model output."""
+    return THINK_BLOCK_RE.sub("", text).lstrip("\n")
 
 
 class OllamaClient:
@@ -25,7 +36,7 @@ class OllamaClient:
 
     def __init__(
         self,
-        model_name: str = "deepseek-r1",
+        model_name: str = DEFAULT_OLLAMA_MODEL,
         api_base: str = "http://localhost:11434",
         max_tokens: int = 2000,
         temperature: float = 0.7,
@@ -155,22 +166,23 @@ class OllamaClient:
             response.raise_for_status()
 
             result = response.json()
-            output_text = result.get("response", "")
+            output_text = strip_think_blocks(result.get("response", ""))
 
             # Track usage if enabled
             if self.tracker:
                 end_time = time.perf_counter()
                 duration_ms = (end_time - start_time) * 1000
 
-                # Ollama doesn't provide token counts, so we estimate
+                # Ollama reports real token counts in the final response;
+                # fall back to estimation when they are missing.
                 self.tracker.track_llm_call(
                     provider="ollama",
                     model=self.model_name,
                     input_text=prompt,
                     output_text=output_text,
                     duration_ms=duration_ms,
-                    input_tokens=None,  # Will be estimated
-                    output_tokens=None,  # Will be estimated
+                    input_tokens=result.get("prompt_eval_count"),
+                    output_tokens=result.get("eval_count"),
                     metadata=metadata,
                 )
 

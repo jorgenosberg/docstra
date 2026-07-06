@@ -16,12 +16,23 @@ class ModelProvider(str, Enum):
         return self.value
 
 
+# Default models per provider. Local-first: Ollama is the default provider,
+# so these are the models a fresh install reaches for. Changing the embedding
+# model requires re-running 'docstra ingest' (it rebuilds the vector store).
+DEFAULT_OLLAMA_MODEL = "qwen3:8b"
+DEFAULT_OLLAMA_EMBEDDING_MODEL = "nomic-embed-text"
+DEFAULT_OPENAI_MODEL = "gpt-5-mini"
+DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
+
+
 class ModelConfig:
     def __init__(
         self,
         provider: ModelProvider = ModelProvider.OLLAMA,
-        model_name: str = "llama3.2",
+        model_name: str = DEFAULT_OLLAMA_MODEL,
         model_name_chat: Optional[str] = None,
+        model_name_overview: Optional[str] = None,
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
         max_tokens: int = 4000,
@@ -34,6 +45,8 @@ class ModelConfig:
         self.provider = provider
         self.model_name = model_name
         self.model_name_chat = model_name_chat or model_name
+        # Optional larger model for overview/module pages; None uses model_name
+        self.model_name_overview = model_name_overview
         self.api_key = api_key
         self.api_base = api_base
         self.max_tokens = max_tokens
@@ -47,8 +60,8 @@ class ModelConfig:
 class EmbeddingConfig:
     def __init__(
         self,
-        provider: str = "huggingface",
-        model_name: str = "all-MiniLM-L6-v2",
+        provider: str = "ollama",
+        model_name: str = DEFAULT_OLLAMA_EMBEDDING_MODEL,
         api_key: Optional[str] = None,
     ) -> None:
         self.provider = provider
@@ -205,6 +218,7 @@ class UserConfig:
                 "provider": str(self.model.provider),
                 "model_name": self.model.model_name,
                 "model_name_chat": self.model.model_name_chat,
+                "model_name_overview": self.model.model_name_overview,
                 "api_key": self.model.api_key,
                 "api_base": self.model.api_base,
                 "max_tokens": self.model.max_tokens,
@@ -260,6 +274,8 @@ class UserConfig:
                 self.model.model_name = model_data["model_name"]
             if "model_name_chat" in model_data:
                 self.model.model_name_chat = model_data["model_name_chat"]
+            if "model_name_overview" in model_data:
+                self.model.model_name_overview = model_data["model_name_overview"]
             if "api_key" in model_data:
                 self.model.api_key = model_data["api_key"]
             if "api_base" in model_data:
@@ -301,6 +317,16 @@ class UserConfig:
                 self.processing.chunk_overlap = processing_data["chunk_overlap"]
             if "exclude_patterns" in processing_data:
                 self.processing.exclude_patterns = processing_data["exclude_patterns"]
+
+        if "ingestion" in config_dict and config_dict["ingestion"]:
+            for key, value in config_dict["ingestion"].items():
+                if hasattr(self.ingestion, key):
+                    setattr(self.ingestion, key, value)
+
+        if "documentation" in config_dict and config_dict["documentation"]:
+            for key, value in config_dict["documentation"].items():
+                if hasattr(self.documentation, key):
+                    setattr(self.documentation, key, value)
 
         if "retrieval" in config_dict:
             retrieval_data = config_dict["retrieval"]
