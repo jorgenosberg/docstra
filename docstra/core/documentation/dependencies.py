@@ -139,6 +139,26 @@ class DocumentationDependencyTracker:
 
         self._save_dependencies()
 
+    def record_pages(self, pages: Dict[str, List[str]]) -> None:
+        """Record generated pages and the source files that invalidate them.
+
+        Args:
+            pages: Mapping of doc output path to the source file ids whose
+                changes require regenerating that page.
+        """
+        for doc_path, source_files in pages.items():
+            self.dependencies[doc_path] = DocumentationDependency(
+                doc_path=doc_path,
+                source_files=source_files,
+                related_docs=[],
+                dependency_hash=self._calculate_dependency_hash(source_files),
+                last_generated=time.time(),
+                generation_context={},
+                cross_references=[],
+            )
+        if pages:
+            self._save_dependencies()
+
     def get_impacted_documentation(self, changed_files: List[str]) -> List[str]:
         """Find all documentation pages that need regeneration due to file changes."""
         impacted_docs = []
