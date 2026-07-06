@@ -8,7 +8,6 @@ import os
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Set, Union
-import yaml
 import concurrent.futures
 import time
 
@@ -36,6 +35,13 @@ from docstra.core.documentation.prompts import (
     EnhancedDocumentationPrompts,
     PromptFormatters,
 )
+from docstra.core.documentation.pipeline import (
+    analyze_codebase,
+    doc_relative_path,
+    file_doc_path,
+    render_cross_references_section,
+)
+from docstra.core.documentation.pipeline import render as site_render
 from docstra.core.utils.colors import Colors
 
 
@@ -188,6 +194,9 @@ class DocumentationGenerator:
         self.modules: Dict[str, List[Dict[str, Any]]] = {}
         self.global_symbols: Dict[str, List[str]] = {}
 
+        # File id -> output path of its generated page, used for cross-linking
+        self.file_page_paths: Dict[str, str] = {}
+
         # Setup output directories
         self._setup_directories()
 
@@ -296,49 +305,81 @@ class DocumentationGenerator:
             )
             return False
 
+    def update_documentation(
+        self, documents: List[Document], impacted_file_ids: Set[str]
+    ) -> bool:
+        """Regenerate only the file and module pages impacted by a change.
+
+        The overview, guides, and API index are left untouched; the site
+        configuration and navigation are rebuilt so new pages appear.
+
+        Args:
+            documents: All documents in the codebase (needed for module context)
+            impacted_file_ids: Repo-relative ids of files whose pages must be
+                regenerated
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            self._analyze_codebase(documents)
+
+            impacted_docs = [
+                doc
+                for doc in documents
+                if self._doc_relative_path(doc.metadata.filepath) in impacted_file_ids
+            ]
+            if not impacted_docs:
+                self.console.print(
+                    f"[{Colors.DIM}]📄 No documented files impacted, nothing to regenerate[/]"
+                )
+                return True
+
+            self.progress_reporter.start_phase(
+                "files", "Regenerating Impacted File Documentation"
+            )
+            self._generate_file_documentation(impacted_docs)
+            self.progress_reporter.end_phase()
+
+            impacted_paths = {doc.metadata.filepath for doc in impacted_docs}
+            impacted_modules = {
+                module_name: module_docs
+                for module_name, module_docs in self.module_structure.items()
+                if any(doc.metadata.filepath in impacted_paths for doc in module_docs)
+            }
+            self.progress_reporter.start_phase(
+                "modules", "Regenerating Impacted Module Documentation"
+            )
+            for module_name, module_docs in impacted_modules.items():
+                self._generate_single_module_doc(module_name, module_docs)
+            self.progress_reporter.end_phase()
+
+            self.progress_reporter.start_phase("build", "Rebuilding Documentation Site")
+            self._build_documentation_site()
+            self.progress_reporter.end_phase()
+
+            self.console.print(
+                f"[{Colors.DIM}]📄 Regenerated {len(impacted_docs)} file pages and "
+                f"{len(impacted_modules)} module pages[/]"
+            )
+            return True
+
+        except Exception as e:
+            self.console.print(
+                f"[{Colors.ERROR_BOLD}]Error during documentation update: {e}[/]"
+            )
+            return False
+
     def _analyze_codebase(self, documents: List[Document]) -> None:
         """Analyze the codebase structure and organize documents."""
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-            TimeElapsedColumn(),
-            console=self.console,
-            transient=False,
-        ) as progress:
-            analysis_task = progress.add_task(
-                f"[{Colors.INFO}]🔍 Analyzing codebase structure...",
-                total=len(documents),
+        analysis = analyze_codebase(documents, self.repo_map)
+        self.module_structure = analysis.module_structure
+        for doc in documents:
+            self.processed_documents[doc.metadata.filepath] = doc
+            file_id = doc_relative_path(doc.metadata.filepath, self.code_index)
+            self.file_page_paths[file_id] = file_doc_path(
+                doc.metadata.filepath, self.code_index
             )
-
-            # Group documents by module/directory
-            for i, doc in enumerate(documents):
-                self.processed_documents[doc.metadata.filepath] = doc
-
-                # Update progress with current file
-                progress.update(
-                    analysis_task,
-                    advance=1,
-                    description=f"[{Colors.INFO}]🔍 Analyzing {Path(doc.metadata.filepath).name}...",
-                )
-
-                # Determine module category
-                if self.repo_map:
-                    module_category = self.repo_map._categorize_module(
-                        doc.metadata.filepath
-                    )
-                else:
-                    # Fallback: use directory name
-                    module_category = Path(doc.metadata.filepath).parent.name or "root"
-
-                if module_category not in self.module_structure:
-                    self.module_structure[module_category] = []
-                self.module_structure[module_category].append(doc)
-
-                # Small delay for very fast operations to make progress visible
-                if len(documents) < 50:
-                    time.sleep(0.01)
 
         # Show analysis results
         self.console.print(
@@ -660,12 +701,15 @@ class DocumentationGenerator:
 
             # Save file documentation with a deterministic cross-reference section
             rel_path = self._doc_relative_path(document.metadata.filepath)
+            page_path = file_doc_path(document.metadata.filepath, self.code_index)
             doc_path = self.output_dir / "docs" / "api" / f"{rel_path}.md"
 
             os.makedirs(doc_path.parent, exist_ok=True)
 
-            cross_refs_section = self._render_cross_references_section(
-                self._get_file_cross_references(document)
+            cross_refs_section = render_cross_references_section(
+                self._get_file_cross_references(document),
+                source_doc_path=page_path,
+                target_doc_paths=self.file_page_paths,
             )
             with open(doc_path, "w", encoding="utf-8") as f:
                 f.write(
@@ -684,15 +728,7 @@ class DocumentationGenerator:
 
     def _doc_relative_path(self, filepath: str) -> str:
         """Map a source file path to a repo-relative doc path inside output_dir."""
-        if self.code_index:
-            normalized = self.code_index.normalize_file_id(filepath)
-            if normalized and ".." not in Path(normalized).parts:
-                return normalized
-
-        rel_path = os.path.relpath(filepath, start=".")
-        if ".." in Path(rel_path).parts:
-            return Path(filepath).name
-        return rel_path
+        return doc_relative_path(filepath, self.code_index)
 
     def _build_file_context(self, document: Document) -> str:
         """Build rich context information for a file."""
@@ -803,22 +839,7 @@ class DocumentationGenerator:
     @staticmethod
     def _render_cross_references_section(cross_refs: Dict[str, List[str]]) -> str:
         """Render a deterministic cross-references section from graph data."""
-        imports = sorted(cross_refs.get("imports", []))
-        imported_by = sorted(cross_refs.get("imported_by", []))
-        if not imports and not imported_by:
-            return ""
-
-        lines = ["", "", "## Cross-references", ""]
-        if imports:
-            lines.append("**Imports:**")
-            lines.extend(f"- `{file_id}`" for file_id in imports)
-        if imported_by:
-            if imports:
-                lines.append("")
-            lines.append("**Imported by:**")
-            lines.extend(f"- `{file_id}`" for file_id in imported_by)
-        lines.append("")
-        return "\n".join(lines)
+        return render_cross_references_section(cross_refs)
 
     def _generate_user_guides(self) -> None:
         """Generate user guides and tutorials."""
@@ -1048,96 +1069,19 @@ class DocumentationGenerator:
 
     def _generate_mkdocs_config(self) -> None:
         """Generate MkDocs configuration file."""
-        config = {
-            "site_name": self.project_name,
-            "site_description": self.project_description,
-            "theme": {
-                "name": "material",
-                "palette": {"primary": "indigo", "accent": "indigo"},
-                "features": [
-                    "navigation.instant",
-                    "navigation.tracking",
-                    "navigation.expand",
-                    "navigation.indexes",
-                    "search.highlight",
-                    "search.share",
-                    "toc.follow",
-                    "content.code.copy",
-                ],
-            },
-            "markdown_extensions": [
-                "pymdownx.highlight",
-                "pymdownx.superfences",
-                "pymdownx.inlinehilite",
-                "pymdownx.tabbed",
-                "admonition",
-                "toc",
-                "tables",
-            ],
-            "plugins": ["search"],
-            "docs_dir": "docs",
-        }
-
-        config_path = self.output_dir / "mkdocs.yml"
-        with open(config_path, "w", encoding="utf-8") as f:
-            yaml.dump(config, f, default_flow_style=False)
+        site_render.write_mkdocs_config(
+            self.output_dir, self.project_name, self.project_description
+        )
 
     def _generate_navigation(self) -> None:
         """Generate navigation structure."""
-        nav: List[Any] = [
-            {"Home": "index.md"},
-        ]
-
-        # Add guides if they exist
-        guides_dir = self.output_dir / "docs" / "guides"
-        if guides_dir.exists() and any(guides_dir.iterdir()):
-            guide_items: List[Dict[str, str]] = []
-            for guide_file in sorted(guides_dir.glob("*.md")):
-                title = guide_file.stem.replace("-", " ").title()
-                guide_items.append({title: f"guides/{guide_file.name}"})
-            if guide_items:
-                nav.append({"Guides": guide_items})
-
-        # Add modules
-        modules_dir = self.output_dir / "docs" / "modules"
-        if modules_dir.exists() and any(modules_dir.iterdir()):
-            module_items: List[Dict[str, str]] = []
-            for module_dir in sorted(modules_dir.iterdir()):
-                if module_dir.is_dir():
-                    index_file = module_dir / "index.md"
-                    if index_file.exists():
-                        title = module_dir.name.replace("_", " ").title()
-                        module_items.append(
-                            {title: f"modules/{module_dir.name}/index.md"}
-                        )
-            if module_items:
-                nav.append({"Modules": module_items})
-
-        # Add API reference
-        api_index = self.output_dir / "docs" / "api" / "index.md"
-        if api_index.exists():
-            nav.append({"API Reference": "api/index.md"})
-
-        # Update MkDocs config with navigation
-        config_path = self.output_dir / "mkdocs.yml"
-        if config_path.exists():
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = yaml.safe_load(f)
-            config["nav"] = nav
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(config, f, default_flow_style=False)
+        site_render.update_navigation(self.output_dir)
 
     def _build_with_mkdocs(self) -> None:
         """Build the documentation site with MkDocs."""
-        try:
-            subprocess.run(
-                ["mkdocs", "build"],
-                cwd=self.output_dir,
-                check=True,
-                capture_output=True,
-            )
+        if site_render.build_mkdocs_site(self.output_dir):
             self.console.print(f"[{Colors.SUCCESS}]MkDocs site built successfully![/]")
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        else:
             self.console.print(
                 f"[{Colors.WARNING}]MkDocs not available. Documentation generated as Markdown files.[/]"
             )
