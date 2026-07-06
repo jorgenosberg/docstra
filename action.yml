@@ -1,0 +1,100 @@
+name: "Docstra Docs Update"
+description: >-
+  Regenerate only the documentation impacted by a push, using Docstra's
+  import graph. Runs 'docstra update', verifies links with 'docstra
+  check-docs', and optionally commits the refreshed pages.
+branding:
+  icon: "book-open"
+  color: "blue"
+
+inputs:
+  base-ref:
+    description: "Git ref to diff against for change detection"
+    required: false
+    default: "HEAD~1"
+  output-dir:
+    description: "Documentation output directory"
+    required: false
+    default: "./docs"
+  provider:
+    description: "Model provider (openai, anthropic, ollama). Omit to use the repo's .docstra/config.yaml"
+    required: false
+    default: ""
+  model:
+    description: "Model name, used together with 'provider'"
+    required: false
+    default: ""
+  api-base:
+    description: "Base URL for an OpenAI-compatible server, used together with 'provider'"
+    required: false
+    default: ""
+  api-key:
+    description: "API key for the provider; exported as OPENAI_API_KEY and ANTHROPIC_API_KEY"
+    required: false
+    default: ""
+  commit:
+    description: "Commit and push the refreshed documentation"
+    required: false
+    default: "true"
+  version:
+    description: "Docstra version to install (PyPI specifier)"
+    required: false
+    default: "latest"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+
+    - name: Install docstra
+      shell: bash
+      run: |
+        if [ "${{ inputs.version }}" = "latest" ]; then
+          uv tool install docstra
+        else
+          uv tool install "docstra==${{ inputs.version }}"
+        fi
+
+    - name: Write configuration from inputs
+      if: inputs.provider != ''
+      shell: bash
+      run: |
+        mkdir -p .docstra
+        if [ -f .docstra/config.yaml ]; then
+          echo "Repo already has .docstra/config.yaml; provider input ignored."
+        else
+          {
+            echo "model:"
+            echo "  provider: ${{ inputs.provider }}"
+            [ -n "${{ inputs.model }}" ] && echo "  model_name: ${{ inputs.model }}"
+            [ -n "${{ inputs.api-base }}" ] && echo "  api_base: ${{ inputs.api-base }}"
+          } > .docstra/config.yaml
+        fi
+
+    - name: Update documentation
+      shell: bash
+      env:
+        OPENAI_API_KEY: ${{ inputs.api-key }}
+        ANTHROPIC_API_KEY: ${{ inputs.api-key }}
+      run: |
+        docstra update . --base "${{ inputs.base-ref }}" --output "${{ inputs.output-dir }}"
+
+    - name: Check documentation
+      shell: bash
+      run: |
+        docstra check-docs "${{ inputs.output-dir }}"
+
+    - name: Commit refreshed documentation
+      if: inputs.commit == 'true'
+      shell: bash
+      run: |
+        if git diff --quiet -- "${{ inputs.output-dir }}"; then
+          echo "Documentation already up to date."
+          exit 0
+        fi
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add "${{ inputs.output-dir }}"
+        git commit -m "docs: update generated documentation"
+        git push

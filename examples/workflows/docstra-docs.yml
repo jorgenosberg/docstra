@@ -1,0 +1,26 @@
+# Example workflow: keep generated documentation current on every merge.
+# Copy into .github/workflows/ of the repository you want documented.
+name: Docs
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  update-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Needed so 'docstra update' can diff against the previous commit
+          fetch-depth: 2
+
+      - uses: jorgenosberg/docstra@main
+        with:
+          provider: openai
+          model: gpt-5-mini
+          api-key: ${{ secrets.OPENAI_API_KEY }}
+          base-ref: ${{ github.event.before }}
