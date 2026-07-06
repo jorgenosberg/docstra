@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.2](https://github.com/jorgenosberg/docstra/compare/docstra-v0.3.1...docstra-v0.3.2) (2026-07-06)
+
+
+### Features
+
+* **ci:** add GitHub Action for incremental docs updates ([b6e1c8f](https://github.com/jorgenosberg/docstra/commit/b6e1c8f0c9a875a5c29fdb54146bd12382cac702))
+* **docs:** emit llms.txt and llms-full.txt with the site build ([9ee1c14](https://github.com/jorgenosberg/docstra/commit/9ee1c14304e29514d63e6df26f4378d781b2e080))
+* **llm:** refresh model defaults and add shared client factory ([af561b6](https://github.com/jorgenosberg/docstra/commit/af561b6dfaf51536e36f259f15f19f1ba93f34f6))
+* **llm:** support OpenAI-compatible local servers via api_base ([db507da](https://github.com/jorgenosberg/docstra/commit/db507da8d52b9cd781b7dccde6ed0c5238ce6285))
+* **mcp:** serve the code index to agents over MCP ([dd35cab](https://github.com/jorgenosberg/docstra/commit/dd35cab9a1ed8be88d34883c1f55c2e7e8aab6f4))
+
+
+### Bug Fixes
+
+* **collector:** exclude dependency, cache, and build directories by default ([2f73524](https://github.com/jorgenosberg/docstra/commit/2f73524436998acac9b62e470e499b38bb010250))
+* **ingestion:** survive oversized embeddings, duplicate chunk ids, and chroma telemetry noise ([84190e5](https://github.com/jorgenosberg/docstra/commit/84190e5b455fec895680e5b5c36d5332fb7bf2aa))
+
 ## [0.3.1](https://github.com/jorgenosberg/docstra/compare/docstra-v0.3.0...docstra-v0.3.1) (2026-07-06)
 
 
