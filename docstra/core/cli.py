@@ -1650,6 +1650,31 @@ def index(
         raise typer.Exit(code=1)
 
 
+@app.command("serve-mcp")
+def serve_mcp(
+    codebase_path: str = typer.Argument(".", help="Path to the indexed codebase"),
+    config_path: Optional[str] = typer.Option(
+        None, "--config", "-c", help="Path to the configuration file"
+    ),
+) -> None:
+    """Serve the Docstra index to MCP clients over stdio.
+
+    Exposes lookup_symbol, who_references, file_summary, search, and
+    generated documentation pages. Register it in an MCP client, e.g.:
+    'claude mcp add docstra -- docstra serve-mcp /path/to/repo'.
+    """
+    from docstra.core.mcp.server import build_server
+
+    try:
+        server = build_server(codebase_path, config_path)
+    except FileNotFoundError as exc:
+        console.print(f"[{Colors.ERROR_BOLD}]Error:[/] {exc}")
+        raise typer.Exit(code=1)
+
+    # stdio transport: from here on stdout belongs to the MCP protocol.
+    server.run()
+
+
 @app.command("check-docs")
 def check_docs(
     docs_dir: str = typer.Argument(

@@ -24,6 +24,7 @@ dependencies = [
     "jinaai>=0.2.10,<0.3",
     "jinja2>=3.1.6,<4",
     "markdown>=3.8,<4",
+    "mcp>=1.28.1",
     "mkdocs>=1.6.1,<2",
     "mkdocs-material>=9.6.11,<10",
     "mkdocstrings>=1.0.4,<2",
