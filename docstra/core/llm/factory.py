@@ -36,9 +36,12 @@ def create_llm_client(config: UserConfig, model_name: Optional[str] = None) -> A
     if provider == ModelProvider.OPENAI:
         from docstra.core.llm.openai import OpenAIClient
 
+        # api_base makes this provider work with any OpenAI-compatible
+        # local server (LM Studio, mlx_lm.server, llama-server, vLLM).
         return OpenAIClient(
             model_name=effective_model,
             api_key=config.model.api_key,
+            api_base=config.model.api_base,
             max_tokens=config.model.max_tokens,
             temperature=config.model.temperature,
         )

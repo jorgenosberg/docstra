@@ -28,6 +28,7 @@ class OpenAIClient:
         self,
         model_name: str = DEFAULT_OPENAI_MODEL,
         api_key: Optional[str] = None,
+        api_base: Optional[str] = None,
         max_tokens: int = 4000,
         temperature: float = 0.7,
         enable_tracking: bool = True,
@@ -36,23 +37,32 @@ class OpenAIClient:
 
         Args:
             model_name: Name of the OpenAI model to use
-            api_key: OpenAI API key (if None, uses OPENAI_API_KEY env var)
+            api_key: OpenAI API key (if None, uses OPENAI_API_KEY env var);
+                optional when api_base points at a local server
+            api_base: Optional base URL of an OpenAI-compatible server
+                (LM Studio, mlx_lm.server, llama-server, vLLM)
             max_tokens: Maximum number of tokens to generate
             temperature: Temperature for generation (0.0 to 1.0)
             enable_tracking: Whether to enable usage tracking
         """
         self.model_name = model_name
+        self.api_base = api_base
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.enable_tracking = enable_tracking
 
-        # Get API key from parameter or environment variable
+        # Get API key from parameter or environment variable. Local
+        # OpenAI-compatible servers accept any key, so only require one
+        # when talking to the real OpenAI API.
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
         if not self.api_key:
-            raise ValueError("OpenAI API key is required")
+            if api_base:
+                self.api_key = "not-needed"
+            else:
+                raise ValueError("OpenAI API key is required")
 
         # Initialize OpenAI client
-        self.client = openai.OpenAI(api_key=self.api_key)
+        self.client = openai.OpenAI(api_key=self.api_key, base_url=api_base)
 
         # Initialize prompt builder
         self.prompt_builder = PromptBuilder()

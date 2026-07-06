@@ -157,11 +157,16 @@ class OpenAIEmbeddingGenerator(EmbeddingGenerator):
     ) -> None:
         super().__init__()
         self.model_name = model_name
+        # Local OpenAI-compatible servers accept any key, so only require
+        # one when talking to the real OpenAI API.
         resolved_api_key = api_key or os.environ.get("OPENAI_API_KEY")
         if not resolved_api_key:
-            raise ValueError(
-                "OpenAI API key not found. Set OPENAI_API_KEY or embedding.api_key."
-            )
+            if api_base:
+                resolved_api_key = "not-needed"
+            else:
+                raise ValueError(
+                    "OpenAI API key not found. Set OPENAI_API_KEY or embedding.api_key."
+                )
 
         from openai import OpenAI
 

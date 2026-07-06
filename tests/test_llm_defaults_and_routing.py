@@ -69,6 +69,36 @@ def test_factory_builds_ollama_client_with_model_override() -> None:
     assert overview_client.model_name == "qwen3:32b"
 
 
+def test_openai_provider_works_against_local_compatible_server_without_key(
+    monkeypatch,
+) -> None:
+    from docstra.core.llm.openai import OpenAIClient
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    config = UserConfig()
+    config.model.provider = ModelProvider.OPENAI
+    config.model.model_name = "qwen3-8b-mlx"
+    config.model.api_base = "http://localhost:1234/v1"
+
+    client = create_llm_client(config)
+    assert isinstance(client, OpenAIClient)
+    assert client.model_name == "qwen3-8b-mlx"
+    assert client.api_base == "http://localhost:1234/v1"
+
+
+def test_openai_provider_still_requires_key_for_real_api(monkeypatch) -> None:
+    import pytest
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    config = UserConfig()
+    config.model.provider = ModelProvider.OPENAI
+
+    with pytest.raises(ValueError, match="API key"):
+        create_llm_client(config)
+
+
 class RecordingClient:
     def __init__(self, name: str) -> None:
         self.name = name
