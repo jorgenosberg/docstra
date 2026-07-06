@@ -1650,6 +1650,88 @@ def index(
         raise typer.Exit(code=1)
 
 
+@app.command("check-docs")
+def check_docs(
+    docs_dir: str = typer.Argument(
+        None, help="Documentation output directory (defaults to the configured one)"
+    ),
+    codebase_path: str = typer.Option(
+        ".", "--codebase", "-C", help="Path to the codebase"
+    ),
+    config_path: Optional[str] = typer.Option(
+        None, "--config", "-c", help="Path to the configuration file"
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Print machine-readable JSON output"
+    ),
+) -> None:
+    """Run deterministic checks on generated documentation.
+
+    Verifies that internal markdown links resolve and that every
+    cross-reference entry names a file present in the core index.
+    """
+    from docstra.core.documentation.checks import check_documentation
+    from docstra.core.indexing.code_index import CodebaseIndexer
+    from docstra.core.indexing.model import CORE_INDEX_FILENAME
+
+    user_config = load_or_init_config(config_path)
+    abs_codebase_path = Path(codebase_path).resolve()
+
+    doc_config = user_config.documentation
+    default_output = doc_config.output_dir if doc_config else "./docs"
+    output_dir = Path(docs_dir or default_output)
+    if not output_dir.is_absolute():
+        output_dir = abs_codebase_path / output_dir
+    if not output_dir.exists():
+        console.print(
+            f"[{Colors.ERROR_BOLD}]Documentation directory not found: {output_dir}[/]"
+        )
+        raise typer.Exit(code=1)
+
+    persist_dir = Path(user_config.storage.persist_directory)
+    if not persist_dir.is_absolute():
+        persist_dir = abs_codebase_path / persist_dir
+    index_dir = persist_dir / "index"
+
+    code_index = None
+    if (index_dir / CORE_INDEX_FILENAME).exists():
+        code_index = CodebaseIndexer(
+            index_directory=str(index_dir), codebase_root=str(abs_codebase_path)
+        ).get_index()
+    else:
+        console.print(
+            f"[{Colors.WARNING}]No core index found; skipping cross-reference "
+            f"resolution checks. Run 'docstra index' first for full coverage.[/]"
+        )
+
+    report = check_documentation(output_dir, code_index)
+
+    if json_output:
+        console.print(json.dumps(report.to_dict(), indent=2))
+    else:
+        console.print(
+            f"Checked {report.pages_checked} pages, {report.links_checked} internal "
+            f"links, {report.cross_references_checked} cross-references."
+        )
+        if report.passed:
+            console.print(f"[{Colors.SUCCESS_BOLD}]All documentation checks passed.[/]")
+        else:
+            issue_table = Table(
+                title="Documentation Issues",
+                show_header=True,
+                header_style=Colors.ERROR_BOLD,
+            )
+            issue_table.add_column("Check", style=Colors.WARNING)
+            issue_table.add_column("Page", style=Colors.HIGHLIGHT)
+            issue_table.add_column("Detail")
+            for issue in report.issues:
+                issue_table.add_row(issue.check, issue.doc_path, issue.detail)
+            console.print(issue_table)
+
+    if not report.passed:
+        raise typer.Exit(code=1)
+
+
 def format_file_link(abs_path: str, start_line, end_line) -> str:
     """Format a link with line numbers for Rich clickable links."""
     file_url = f"{quote(abs_path)}"
