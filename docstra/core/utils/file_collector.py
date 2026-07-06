@@ -3,6 +3,47 @@ import logging
 from pathlib import Path
 from typing import List, Optional, Pattern, Union, Dict, cast
 
+# Directories no one wants indexed or documented: dependency trees, VCS
+# internals, caches, and build output. Pruned during the walk so large
+# trees like .venv are never traversed. Explicit include_dirs still win,
+# and a .docstraignore can add project-specific patterns on top.
+DEFAULT_EXCLUDE_DIRS: List[str] = [
+    ".git/",
+    ".hg/",
+    ".svn/",
+    ".docstra/",
+    "node_modules/",
+    "bower_components/",
+    ".venv/",
+    "venv/",
+    "env/",
+    ".env/",
+    "virtualenv/",
+    "site-packages/",
+    "__pycache__/",
+    ".mypy_cache/",
+    ".pytest_cache/",
+    ".ruff_cache/",
+    ".tox/",
+    ".nox/",
+    ".eggs/",
+    "*.egg-info/",
+    "dist/",
+    "build/",
+    "target/",
+    "out/",
+    ".gradle/",
+    ".idea/",
+    ".vscode/",
+    ".cache/",
+    ".next/",
+    ".nuxt/",
+    ".terraform/",
+    "htmlcov/",
+    "coverage/",
+    "vendor/",
+]
+
 
 class GitIgnorePattern:
     """A single gitignore pattern with matching functionality."""
@@ -263,6 +304,7 @@ class FileCollector:
         exclude_files: Optional[List[str]] = None,
         file_extensions: Optional[List[str]] = None,
         log_level: int = logging.INFO,
+        use_default_excludes: bool = True,
     ):
         """Initialize the file collector.
 
@@ -273,10 +315,14 @@ class FileCollector:
             exclude_files: List of gitignore-style patterns for files to exclude
             file_extensions: List of file extensions to include
             log_level: Logging level
+            use_default_excludes: Prune DEFAULT_EXCLUDE_DIRS (dependency trees,
+                caches, build output) during the walk
         """
         self.base_path = Path(base_path).resolve()
         self.include_dirs = include_dirs or []
         self.file_extensions = file_extensions or []
+        if use_default_excludes:
+            exclude_dirs = DEFAULT_EXCLUDE_DIRS + (exclude_dirs or [])
 
         # Set up logging
         self.logger = logging.getLogger("docstra.file_collector")
