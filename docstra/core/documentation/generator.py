@@ -40,6 +40,7 @@ from docstra.core.documentation.pipeline import (
     doc_relative_path,
     file_doc_path,
     render_cross_references_section,
+    write_llms_txt,
 )
 from docstra.core.documentation.pipeline import render as site_render
 from docstra.core.utils.colors import Colors
@@ -1044,8 +1045,16 @@ class DocumentationGenerator:
             transient=False,
         ) as progress:
             build_task = progress.add_task(
-                f"[{Colors.INFO}]🏗️  Building documentation site...", total=3
+                f"[{Colors.INFO}]🏗️  Building documentation site...", total=4
             )
+
+            # Emit agent-facing outputs from the pages on disk
+            progress.update(
+                build_task,
+                description=f"[{Colors.INFO}]🏗️  Writing llms.txt and llms-full.txt...",
+            )
+            write_llms_txt(self.output_dir, self.project_name, self.project_description)
+            progress.update(build_task, advance=1)
 
             # Generate MkDocs configuration
             progress.update(

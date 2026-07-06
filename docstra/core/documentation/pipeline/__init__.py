@@ -14,6 +14,7 @@ from docstra.core.documentation.pipeline.crosslink import (
     render_cross_references_section,
 )
 from docstra.core.documentation.pipeline.impact import compute_impacted_file_ids
+from docstra.core.documentation.pipeline.llms_txt import write_llms_txt
 from docstra.core.documentation.pipeline.plan import (
     DocPlan,
     PlannedPage,
@@ -33,4 +34,5 @@ __all__ = [
     "module_category",
     "plan_documentation",
     "render_cross_references_section",
+    "write_llms_txt",
 ]
