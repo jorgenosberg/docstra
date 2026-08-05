@@ -18,7 +18,7 @@ classifiers = [
 ]
 dependencies = [
     "anthropic>=0.109.1,<0.110",
-    "chromadb>=0.6.3,<0.7",
+    "chromadb>=0.6.3,<1.6",
     "einops>=0.8.1,<0.9",
     "fastapi>=0.136.3,<0.142",
     "jinaai>=0.2.10,<0.3",

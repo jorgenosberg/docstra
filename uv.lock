@@ -1023,7 +1023,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.109.1,<0.110" },
-    { name = "chromadb", specifier = ">=0.6.3,<0.7" },
+    { name = "chromadb", specifier = ">=0.6.3,<1.6" },
     { name = "einops", specifier = ">=0.8.1,<0.9" },
     { name = "fastapi", specifier = ">=0.136.3,<0.142" },
     { name = "jinaai", specifier = ">=0.2.10,<0.3" },
