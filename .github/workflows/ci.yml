@@ -12,11 +12,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          version: "0.13.8"
           enable-cache: true
           python-version: "3.12"
 
@@ -39,4 +40,10 @@ jobs:
         run: uv run --locked --no-sync pytest
 
       - name: Audit dependencies
-        run: uv audit --locked --ignore-until-fixed GHSA-rrmf-rvhw-rf47
+        # ChromaDB server advisories do not apply to our local PersistentClient.
+        # These exceptions expire when fixes become available. See SECURITY.md.
+        run: >-
+          uv audit --locked
+          --ignore-until-fixed GHSA-36p7-vc44-83pf
+          --ignore-until-fixed GHSA-xph7-9rjv-w5fr
+          --ignore-until-fixed GHSA-2wm9-hf6c-p5cr
