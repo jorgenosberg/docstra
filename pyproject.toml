@@ -1,6 +1,6 @@
 [project]
 name = "docstra"
-version = "0.3.1"
+version = "0.3.2"
 description = "LLM-powered code documentation assistant"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -43,7 +43,7 @@ dependencies = [
     "transformers>=5.11.0,<6",
     "tree-sitter>=0.24.0,<0.25",
     "tree-sitter-language-pack>=0.6.1,<0.7",
-    "typer>=0.15.4,<0.28",
+    "typer>=0.15.4,<0.16",
     "uvicorn>=0.34.2,<0.35",
 ]
 
