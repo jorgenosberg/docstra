@@ -122,7 +122,7 @@ class FusionRetriever:
         # - Prefer complete functions/methods
         # - Prefer moderately sized chunks (not too short, not too long)
         # - Prefer chunks with meaningful names
-        good_examples = []
+        good_examples: List[Dict[str, Any]] = []
 
         for chunk in vector_results:
             chunk_type = chunk["metadata"].get("chunk_type", "")
