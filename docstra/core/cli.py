@@ -1668,11 +1668,15 @@ def serve_mcp(
     try:
         server = build_server(codebase_path, config_path)
     except FileNotFoundError as exc:
-        console.print(f"[{Colors.ERROR_BOLD}]Error:[/] {exc}")
+        # stderr: stdout is reserved for the MCP protocol.
+        Console(stderr=True).print(f"[{Colors.ERROR_BOLD}]Error:[/] {exc}")
         raise typer.Exit(code=1)
 
     # stdio transport: from here on stdout belongs to the MCP protocol.
-    server.run()
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        pass
 
 
 @app.command("check-docs")

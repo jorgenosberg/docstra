@@ -6,6 +6,7 @@ isolation and safe for a stdio transport (which must not write to stdout).
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -23,6 +24,9 @@ class IndexToolbox:
     def __init__(self, codebase_path: str, user_config: UserConfig) -> None:
         self.codebase_path = Path(codebase_path).resolve()
         self.user_config = user_config
+        # MCP runs sync tools on worker threads. The dense path (Chroma client
+        # plus embedding model) is not documented as thread-safe, so serialize it.
+        self._dense_lock = threading.Lock()
 
         persist_dir = Path(user_config.storage.persist_directory)
         if not persist_dir.is_absolute():
@@ -114,9 +118,10 @@ class IndexToolbox:
             }
 
         if self.fusion_retriever:
-            chunks = self.fusion_retriever.retrieve_chunks(
-                query=query, n_results=n_results
-            )
+            with self._dense_lock:
+                chunks = self.fusion_retriever.retrieve_chunks(
+                    query=query, n_results=n_results
+                )
             mode = "hybrid"
         else:
             # 'docstra index' alone populates symbols but not chunks, so
