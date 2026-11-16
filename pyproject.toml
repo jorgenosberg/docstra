@@ -43,7 +43,7 @@ dependencies = [
     "transformers>=5.11.0,<6",
     "tree-sitter>=0.24.0,<0.25",
     "tree-sitter-language-pack>=0.6.1,<0.7",
-    "typer>=0.15.4,<0.16",
+    "typer>=0.15.4,<0.28",
     "uvicorn>=0.34.2,<0.35",
 ]
 
