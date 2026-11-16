@@ -1,11 +1,11 @@
-"""FastMCP server wiring for the Docstra index toolbox."""
+"""MCPServer wiring for the Docstra index toolbox."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from docstra.core.config.settings import ConfigManager
 from docstra.core.mcp.tools import IndexToolbox
@@ -13,7 +13,7 @@ from docstra.core.mcp.tools import IndexToolbox
 
 def build_server(
     codebase_path: str = ".", config_path: Optional[str] = None
-) -> FastMCP:
+) -> MCPServer:
     """Build the MCP server for a codebase.
 
     Args:
@@ -21,14 +21,14 @@ def build_server(
         config_path: Optional path to the Docstra config file
 
     Returns:
-        A FastMCP server ready to run over stdio
+        An MCPServer ready to run over stdio
     """
     codebase = Path(codebase_path).resolve()
     effective_config_path = config_path or str(codebase / ".docstra" / "config.yaml")
     user_config = ConfigManager(config_path=effective_config_path).config
 
     toolbox = IndexToolbox(str(codebase), user_config)
-    mcp = FastMCP(
+    mcp = MCPServer(
         "docstra",
         instructions=(
             "Docstra exposes a precomputed, verified index of this codebase: "
