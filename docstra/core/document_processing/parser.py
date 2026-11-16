@@ -787,9 +787,7 @@ class CodeParser:
             if current.type in ["class_definition", "class_declaration"]:
                 name_node = self._find_name_node(current)
                 if name_node:
-                    parents.append(
-                        self.safe_decode(name_node.text) if name_node else ""
-                    )
+                    parents.append(self.safe_decode(name_node.text))
 
             current = current.parent
 
@@ -844,7 +842,7 @@ class CodeParser:
         )
 
         for import_node in import_nodes:
-            imports.append(self.safe_decode(import_node.text) if import_node else "")
+            imports.append(self.safe_decode(import_node.text))
 
         return imports
 
@@ -865,7 +863,7 @@ class CodeParser:
         for class_node in class_nodes:
             name_node = self._find_name_node(class_node)
             if name_node:
-                classes.append(self.safe_decode(name_node.text) if name_node else "")
+                classes.append(self.safe_decode(name_node.text))
 
         return classes
 
@@ -886,7 +884,7 @@ class CodeParser:
         for function_node in function_nodes:
             name_node = self._find_name_node(function_node)
             if name_node:
-                functions.append(self.safe_decode(name_node.text) if name_node else "")
+                functions.append(self.safe_decode(name_node.text))
 
         return functions
 
@@ -905,7 +903,7 @@ class CodeParser:
         self._collect_nodes_by_type(node, ["import_statement"], import_nodes)
 
         for import_node in import_nodes:
-            imports.append(self.safe_decode(import_node.text) if import_node else "")
+            imports.append(self.safe_decode(import_node.text))
 
         return imports
 
@@ -926,7 +924,7 @@ class CodeParser:
         for class_node in class_nodes:
             name_node = self._find_name_node(class_node)
             if name_node:
-                classes.append(self.safe_decode(name_node.text) if name_node else "")
+                classes.append(self.safe_decode(name_node.text))
 
         return classes
 
@@ -949,7 +947,7 @@ class CodeParser:
         for function_node in function_nodes:
             name_node = self._find_name_node(function_node)
             if name_node:
-                functions.append(self.safe_decode(name_node.text) if name_node else "")
+                functions.append(self.safe_decode(name_node.text))
 
         return functions
 
