@@ -24,7 +24,7 @@ dependencies = [
     "jinaai>=0.2.10,<0.3",
     "jinja2>=3.1.6,<4",
     "markdown>=3.8,<4",
-    "mcp>=1.28.1",
+    "mcp>=1.30.0,<2",
     "mkdocs>=1.6.1,<2",
     "mkdocs-material>=9.6.11,<10",
     "mkdocstrings>=1.0.4,<2",
@@ -35,11 +35,11 @@ dependencies = [
     "pyyaml>=6.0.2,<7",
     "requests>=2.32.3,<3",
     "rich>=13.9.4,<14",
-    "sentence-transformers>=5.5.1,<6",
+    "sentence-transformers>=5.6.0,<6",
     "starlette>=1.0.1,<2",
     "tenacity>=9.1.2,<10",
     "tiktoken>=0.9.0,<1",
-    "torch>=2.6.0,<3",
+    "torch>=2.13.0,<3",
     "transformers>=5.11.0,<6",
     "tree-sitter>=0.24.0,<0.25",
     "tree-sitter-language-pack>=0.6.1,<0.7",
@@ -65,12 +65,12 @@ dev = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.11.26,<0.12"]
+requires = ["uv_build>=0.13.8,<0.14"]
 build-backend = "uv_build"
 
 [tool.uv]
 index-strategy = "first-index"
-required-version = ">=0.11.19,<0.12"
+required-version = ">=0.13.8,<0.14"
 
 # Keep this project on PyPI by default. If a non-PyPI source is ever needed,
 # pin it explicitly with [tool.uv.sources] and an explicit [[tool.uv.index]].
