@@ -65,7 +65,7 @@ uv lock --check
 uv run --locked --no-sync ruff check .
 uv run --locked --no-sync ruff format --check .
 uv run --locked --no-sync ty check
-uv audit --locked --ignore-until-fixed GHSA-36p7-vc44-83pf --ignore-until-fixed GHSA-xph7-9rjv-w5fr --ignore-until-fixed GHSA-2wm9-hf6c-p5cr
+uv audit --locked --ignore-until-fixed GHSA-36p7-vc44-83pf --ignore-until-fixed GHSA-xph7-9rjv-w5fr --ignore-until-fixed GHSA-2wm9-hf6c-p5cr --ignore-until-fixed GHSA-f4j7-r4q5-qw2c
 uv run --locked --no-sync pytest
 ```
 
